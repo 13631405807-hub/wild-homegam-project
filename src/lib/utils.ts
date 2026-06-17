@@ -1,4 +1,4 @@
-import { Game, GamePlayer, PlayerStats, LeaderboardEntry } from '@/types';
+import { Game, GamePlayer, GameSettlement, PlayerStats, LeaderboardEntry } from '@/types';
 
 export function cn(...classes: (string | undefined | null | false)[]): string {
   return classes.filter(Boolean).join(' ');
