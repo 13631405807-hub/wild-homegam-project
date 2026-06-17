@@ -6,7 +6,7 @@ import PlayerAvatar from '@/components/PlayerAvatar';
 import ThemeToggle from '@/components/ThemeToggle';
 import {
   LogOut, Edit3, TrendingUp, Zap, Target,
-  Award, Gamepad2
+  Award, Gamepad2, Crown, Settings2
 } from 'lucide-react';
 
 function ProfitChart({ games, userId }: { games: import('@/types').Game[]; userId: string }) {
@@ -80,7 +80,7 @@ function ViewToggle({ view, onChange }: { view: 'chart' | 'list'; onChange: (v: 
 }
 
 export default function ProfilePage() {
-  const { currentUser, games, gameList, logout, updateProfile } = useApp();
+  const { currentUser, games, gameList, logout, updateProfile, isAdmin } = useApp();
   const navigate = useNavigate();
   const [isEditing, setIsEditing] = useState(false);
   const [nickname, setNickname] = useState('');
@@ -129,6 +129,11 @@ export default function ProfilePage() {
             </div>
           ) : (
             <h2 className="text-xl font-bold text-gray-900 dark:text-white">{currentUser.nickname}</h2>
+          )}
+          {isAdmin && (
+            <span className="inline-flex items-center gap-1 mt-1 px-2.5 py-1 rounded-full text-xs font-medium bg-gold-100 dark:bg-gold-900/30 text-gold-700 dark:text-gold-400">
+              <Crown size={12} /> 管理员
+            </span>
           )}
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{currentUser.email}</p>
           {stats && (
@@ -227,6 +232,16 @@ export default function ProfilePage() {
             )
           )}
         </div>
+
+        {/* Admin Link */}
+        {isAdmin && (
+          <button
+            onClick={() => navigate('/admin')}
+            className="w-full btn-secondary flex items-center justify-center gap-2 text-felt-600 dark:text-felt-400"
+          >
+            <Settings2 size={18} /> 进入管理后台
+          </button>
+        )}
 
         {/* Logout */}
         <button onClick={handleLogout} className="w-full btn-secondary flex items-center justify-center gap-2 text-red-500">

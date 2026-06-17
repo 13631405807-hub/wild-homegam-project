@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS profiles (
   id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
   nickname TEXT NOT NULL,
   avatar TEXT,
+  is_admin BOOLEAN DEFAULT false,
+  is_protected BOOLEAN DEFAULT false,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
 );
 
@@ -73,20 +75,28 @@ ALTER TABLE games ENABLE ROW LEVEL SECURITY;
 ALTER TABLE game_players ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
 
--- Profiles: 所有人可读，用户只能编辑自己的
+-- Profiles: 所有人可读，用户只能编辑自己的，管理员可更新所有人
 CREATE POLICY "Public profiles" ON profiles FOR SELECT USING (true);
 CREATE POLICY "Users can update own profile" ON profiles
   FOR UPDATE USING (auth.uid() = id);
 CREATE POLICY "Users can insert own profile" ON profiles
   FOR INSERT WITH CHECK (auth.uid() = id);
+CREATE POLICY "Admins can update any profile" ON profiles
+  FOR UPDATE USING (
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)
+  );
 
--- Games: 登录用户可读，创建者可创建，登录用户可更新
+-- Games: 登录用户可读，创建者可创建，登录用户可更新，管理员可删除
 CREATE POLICY "Authenticated read games" ON games
   FOR SELECT USING (auth.role() = 'authenticated');
 CREATE POLICY "Authenticated create games" ON games
   FOR INSERT WITH CHECK (auth.uid() = created_by);
 CREATE POLICY "Authenticated update games" ON games
   FOR UPDATE USING (auth.role() = 'authenticated');
+CREATE POLICY "Admins can delete games" ON games
+  FOR DELETE USING (
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)
+  );
 
 -- Game players: 登录用户可读写
 CREATE POLICY "Authenticated read players" ON game_players
@@ -115,8 +125,13 @@ ALTER PUBLICATION supabase_realtime ADD TABLE transactions;
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO public.profiles (id, nickname)
-  VALUES (NEW.id, COALESCE(NEW.raw_user_meta_data->>'nickname', split_part(NEW.email, '@', 1)));
+  INSERT INTO public.profiles (id, nickname, is_admin, is_protected)
+  VALUES (
+    NEW.id,
+    COALESCE(NEW.raw_user_meta_data->>'nickname', split_part(NEW.email, '@', 1)),
+    COALESCE((NEW.raw_user_meta_data->>'is_admin')::boolean, false),
+    COALESCE((NEW.raw_user_meta_data->>'is_protected')::boolean, false)
+  );
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -124,3 +139,46 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE OR REPLACE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- ============================================
+-- 如果是已有数据库升级，在这里执行迁移
+-- ============================================
+-- 1. 添加新列到 profiles 表
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT false;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_protected BOOLEAN DEFAULT false;
+
+-- 2. 删除旧策略并重建（避免重复创建报错）
+DROP POLICY IF EXISTS "Users can update own profile" ON profiles;
+CREATE POLICY "Users can update own profile" ON profiles
+  FOR UPDATE USING (auth.uid() = id);
+
+DROP POLICY IF EXISTS "Admins can update any profile" ON profiles;
+CREATE POLICY "Admins can update any profile" ON profiles
+  FOR UPDATE USING (
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)
+  );
+
+DROP POLICY IF EXISTS "Admins can delete games" ON games;
+CREATE POLICY "Admins can delete games" ON games
+  FOR DELETE USING (
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true)
+  );
+
+-- 3. 更新触发器函数
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.profiles (id, nickname, is_admin, is_protected)
+  VALUES (
+    NEW.id,
+    COALESCE(NEW.raw_user_meta_data->>'nickname', split_part(NEW.email, '@', 1)),
+    COALESCE((NEW.raw_user_meta_data->>'is_admin')::boolean, false),
+    COALESCE((NEW.raw_user_meta_data->>'is_protected')::boolean, false)
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 4. 将你的第一个管理员账号设为管理员和受保护（替换邮箱后执行）
+-- UPDATE profiles SET is_admin = true, is_protected = true
+-- WHERE id = (SELECT id FROM auth.users WHERE email = 'admin@wild.game');

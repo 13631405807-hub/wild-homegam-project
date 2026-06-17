@@ -1,20 +1,23 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Home, Trophy, PlusCircle, User } from 'lucide-react';
+import { useApp } from '@/contexts/AppContext';
+import { Home, Trophy, PlusCircle, User, Settings2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-const tabs = [
-  { path: '/', icon: Home, label: '首页' },
-  { path: '/leaderboard', icon: Trophy, label: '排行' },
-  { path: '/new-game', icon: PlusCircle, label: '开局' },
-  { path: '/profile', icon: User, label: '我的' },
-];
 
 export default function BottomNav() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { isAdmin } = useApp();
 
   // Hide on login and game lobby pages
   if (location.pathname === '/login' || location.pathname.startsWith('/game/')) return null;
+
+  const tabs = [
+    { path: '/', icon: Home, label: '首页' },
+    { path: '/leaderboard', icon: Trophy, label: '排行' },
+    { path: '/new-game', icon: PlusCircle, label: '开局' },
+    ...(isAdmin ? [{ path: '/admin', icon: Settings2, label: '管理' }] : []),
+    { path: '/profile', icon: User, label: '我的' },
+  ];
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 glass-card border-t border-gray-200/50 dark:border-white/10 safe-bottom">

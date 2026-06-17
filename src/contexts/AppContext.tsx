@@ -13,7 +13,8 @@ interface AppContextType {
   isAdmin: boolean;
 
   login: (email: string, password: string) => Promise<boolean>;
-  register: (email: string, password: string, nickname: string) => Promise<boolean>;
+  register: (email: string, password: string, nickname: string) => Promise<{ success: boolean; error?: string }>;
+  verifyOtp: (email: string, token: string) => Promise<boolean>;
   logout: () => Promise<void>;
   updateProfile: (nickname: string) => Promise<void>;
 
@@ -35,6 +36,13 @@ interface AppContextType {
   deleteGame: (gameId: string) => Promise<void>;
   removePlayerFromGame: (gameId: string, userId: string) => Promise<void>;
   refreshGames: () => Promise<void>;
+
+  // Admin functions
+  allProfiles: User[];
+  fetchAllProfiles: () => Promise<void>;
+  setAdminStatus: (userId: string, isAdmin: boolean) => Promise<void>;
+  setProtectedStatus: (userId: string, isProtected: boolean) => Promise<void>;
+  adminDeleteGame: (gameId: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType>(null!);
@@ -97,6 +105,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [games, setGames] = useState<Record<string, Game>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [allProfiles, setAllProfiles] = useState<User[]>([]);
 
   const fetchGames = useCallback(async () => {
     const { data } = await supabase
@@ -115,7 +124,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const fetchProfile = useCallback(async (userId: string) => {
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
     if (data) {
-      const user: User = { id: data.id, nickname: data.nickname, email: data.email || '', createdAt: data.created_at };
+      const user: User = {
+        id: data.id,
+        nickname: data.nickname,
+        email: data.email || '',
+        createdAt: data.created_at,
+        isAdmin: data.is_admin || false,
+        isProtected: data.is_protected || false,
+      };
       setCurrentUser(user);
       setUsers(prev => ({ ...prev, [data.id]: user }));
       setIsAdmin(data.is_admin || false);
@@ -153,12 +169,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return !error;
   }, []);
 
-  const register = useCallback(async (email: string, password: string, nickname: string): Promise<boolean> => {
+  const register = useCallback(async (email: string, password: string, nickname: string): Promise<{ success: boolean; error?: string }> => {
     const { error } = await supabase.auth.signUp({
       email, password,
       options: { data: { nickname } },
     });
-    return !error;
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  }, []);
+
+  const verifyOtp = useCallback(async (email: string, token: string): Promise<boolean> => {
+    const { error } = await supabase.auth.verifyOtp({
+      email,
+      token,
+      type: 'signup',
+    });
+    if (error) {
+      console.error('OTP verification error:', error);
+      return false;
+    }
+    return true;
   }, []);
 
   const logout = useCallback(async () => {
@@ -376,6 +408,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await fetchGames();
   }, [fetchGames]);
 
+  // Admin functions
+  const fetchAllProfiles = useCallback(async () => {
+    const { data } = await supabase
+      .from('profiles')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (data) {
+      const profiles: User[] = data.map((p: any) => ({
+        id: p.id,
+        nickname: p.nickname,
+        email: p.email || '',
+        avatar: p.avatar,
+        createdAt: p.created_at,
+        isAdmin: p.is_admin || false,
+        isProtected: p.is_protected || false,
+      }));
+      setAllProfiles(profiles);
+    }
+  }, []);
+
+  const setAdminStatus = useCallback(async (userId: string, admin: boolean) => {
+    await supabase.from('profiles').update({ is_admin: admin }).eq('id', userId);
+    await fetchAllProfiles();
+  }, [fetchAllProfiles]);
+
+  const setProtectedStatus = useCallback(async (userId: string, protectedStatus: boolean) => {
+    await supabase.from('profiles').update({ is_protected: protectedStatus }).eq('id', userId);
+    await fetchAllProfiles();
+  }, [fetchAllProfiles]);
+
+  const adminDeleteGame = useCallback(async (gameId: string) => {
+    await supabase.from('games').delete().eq('id', gameId);
+    await fetchGames();
+  }, [fetchGames]);
+
   const gameList = Object.values(games).sort((a, b) => {
     const dateDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
     if (dateDiff !== 0) return dateDiff;
@@ -385,11 +452,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   return (
     <AppContext.Provider value={{
       currentUser, users, games, gameList, isLoading, isAdmin,
-      login, register, logout, updateProfile,
+      login, register, verifyOtp, logout, updateProfile,
       createGame, joinGame, addPlayerToGame, setBanker, transferBanker, randomBanker, updateGameSettings,
       buyIn, batchBuyIn, returnChips, settlePlayer,
       startGame, settleGame,
       deleteGame, removePlayerFromGame, refreshGames,
+      allProfiles, fetchAllProfiles, setAdminStatus, setProtectedStatus, adminDeleteGame,
     }}>
       {children}
     </AppContext.Provider>

@@ -7,6 +7,7 @@ import NewGamePage from '@/pages/NewGamePage';
 import GameLobbyPage from '@/pages/GameLobbyPage';
 import LeaderboardPage from '@/pages/LeaderboardPage';
 import ProfilePage from '@/pages/ProfilePage';
+import AdminPage from '@/pages/AdminPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { currentUser, isLoading } = useApp();
@@ -50,6 +51,9 @@ function AppRoutes() {
         } />
         <Route path="/profile" element={
           <ProtectedRoute><ProfilePage /></ProtectedRoute>
+        } />
+        <Route path="/admin" element={
+          <ProtectedRoute><AdminPage /></ProtectedRoute>
         } />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

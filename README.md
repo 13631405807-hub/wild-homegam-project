@@ -43,6 +43,17 @@ npm run build
 - 暗色模式：晚 8 点自动切换
 - PWA 支持：添加到主屏幕像原生 app 使用
 
+## 管理员功能
+
+管理员可以：
+- 查看和管理所有注册用户
+- 设置/取消其他用户的管理员权限
+- 设置/取消工具人账号保护（受保护账号无法被删除）
+- 查看和管理所有牌局
+- 删除任意牌局
+
+底部导航栏会为管理员显示"管理"入口。
+
 ## 部署到线上（免费）
 
 ### Step 1: 注册账号
@@ -55,14 +66,31 @@ npm run build
 2. 进入 SQL Editor，执行 `supabase-setup.sql` 中的 SQL
 3. 复制项目的 URL 和 anon key
 
-### Step 3: 配置环境变量
+### Step 3: 配置邮箱验证（推荐）
+Supabase 默认开启邮箱验证。如果你希望快速测试或不需要邮箱验证：
+1. 进入 Supabase Dashboard → Authentication → Providers
+2. 找到 Email 设置
+3. 关闭 "Confirm email" 选项
+
+如果保留邮箱验证，用户注册后需要输入邮箱收到的验证码才能完成注册。
+
+### Step 4: 设置管理员账号
+1. 先在网站上注册一个账号（如 admin@wild.game）
+2. 进入 Supabase Dashboard → SQL Editor
+3. 执行以下 SQL（替换邮箱）：
+```sql
+UPDATE profiles SET is_admin = true, is_protected = true
+WHERE id = (SELECT id FROM auth.users WHERE email = 'admin@wild.game');
+```
+
+### Step 5: 配置环境变量
 创建 `.env` 文件：
 ```
 VITE_SUPABASE_URL=你的supabase项目URL
 VITE_SUPABASE_ANON_KEY=你的supabase anon key
 ```
 
-### Step 4: 部署到 Vercel
+### Step 6: 部署到 Vercel
 1. 将代码推到 GitHub
 2. 在 Vercel 导入 GitHub 仓库
 3. 添加环境变量
@@ -88,6 +116,7 @@ wild-homegame/
 │   │   ├── supabase.ts      # Supabase 客户端
 │   │   └── utils.ts         # 工具函数
 │   ├── pages/             # 页面
+│   │   ├── AdminPage.tsx     # 管理后台（管理员专属）
 │   │   ├── DashboardPage.tsx # 首页
 │   │   ├── GameLobbyPage.tsx # 牌局详情
 │   │   ├── LeaderboardPage.tsx # 排行榜
