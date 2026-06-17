@@ -29,14 +29,14 @@ export default function LoginPage() {
         setIsLoading(false);
         return;
       }
-      const success = register(email, password, nickname);
+      const success = await register(email, password, nickname);
       if (!success) {
-        setError('该邮箱已注册');
+        setError('注册失败，邮箱可能已使用');
         setIsLoading(false);
         return;
       }
     } else {
-      const success = login(email, password);
+      const success = await login(email, password);
       if (!success) {
         setError('邮箱或密码错误');
         setIsLoading(false);
@@ -145,9 +145,9 @@ export default function LoginPage() {
           {/* Quick login hint */}
           {!isRegister && (
             <div className="mt-6 p-3 rounded-xl bg-gray-50 dark:bg-surface-dark-secondary text-xs text-gray-500 dark:text-gray-400">
-              <p className="font-medium text-gray-600 dark:text-gray-300 mb-1">快速体验</p>
-              <p>邮箱: prince@test.com</p>
-              <p>密码: 123456</p>
+              <p className="font-medium text-gray-600 dark:text-gray-300 mb-1">管理员账号</p>
+              <p>邮箱: admin@wild.game</p>
+              <p>密码: wild2024</p>
             </div>
           )}
         </form>

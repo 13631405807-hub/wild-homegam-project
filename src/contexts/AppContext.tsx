@@ -1,6 +1,8 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { User, Game, GamePlayer, GameLog, LogAction } from '@/types';
-import { generateId, chipsToGold, calcPlayerGold, calculateBankerTip } from '@/lib/utils';
+import { supabase } from '@/lib/supabase';
+import { chipsToGold, calcPlayerGold, calculateBankerTip } from '@/lib/utils';
+import { Session } from '@supabase/supabase-js';
 
 interface AppContextType {
   currentUser: User | null;
@@ -8,578 +10,386 @@ interface AppContextType {
   games: Record<string, Game>;
   gameList: Game[];
   isLoading: boolean;
+  isAdmin: boolean;
 
-  login: (email: string, password: string) => boolean;
-  register: (email: string, password: string, nickname: string) => boolean;
-  logout: () => void;
-  updateProfile: (nickname: string) => void;
+  login: (email: string, password: string) => Promise<boolean>;
+  register: (email: string, password: string, nickname: string) => Promise<boolean>;
+  logout: () => Promise<void>;
+  updateProfile: (nickname: string) => Promise<void>;
 
-  createGame: (location: string, date: string, chipsPerHand?: number, goldPerHand?: number) => string;
-  joinGame: (gameId: string) => void;
-  addPlayerToGame: (gameId: string, userId: string) => void;
-  setBanker: (gameId: string, userId: string) => void;
-  transferBanker: (gameId: string, toUserId: string) => void;
-  randomBanker: (gameId: string) => void;
-  updateGameSettings: (gameId: string, chipsPerHand: number, goldPerHand: number) => void;
+  createGame: (location: string, date: string, chipsPerHand?: number, goldPerHand?: number) => Promise<string>;
+  joinGame: (gameId: string) => Promise<void>;
+  addPlayerToGame: (gameId: string, userId: string) => Promise<void>;
+  setBanker: (gameId: string, userId: string) => Promise<void>;
+  transferBanker: (gameId: string, toUserId: string) => Promise<void>;
+  randomBanker: (gameId: string) => Promise<void>;
+  updateGameSettings: (gameId: string, chipsPerHand: number, goldPerHand: number) => Promise<void>;
 
-  buyIn: (gameId: string, userId: string, hands: number) => void;
-  batchBuyIn: (gameId: string, hands: number) => void;
-  returnChips: (gameId: string, userId: string, hands: number) => void;
-  settlePlayer: (gameId: string, userId: string, remainingChips: number) => void;
-  startGame: (gameId: string) => void;
-  settleGame: (gameId: string) => void;
+  buyIn: (gameId: string, userId: string, hands: number) => Promise<void>;
+  batchBuyIn: (gameId: string, hands: number) => Promise<void>;
+  returnChips: (gameId: string, userId: string, hands: number) => Promise<void>;
+  settlePlayer: (gameId: string, userId: string, remainingChips: number) => Promise<void>;
+  startGame: (gameId: string) => Promise<void>;
+  settleGame: (gameId: string) => Promise<void>;
+
+  deleteGame: (gameId: string) => Promise<void>;
+  removePlayerFromGame: (gameId: string, userId: string) => Promise<void>;
+  refreshGames: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType>(null!);
 
-const STORAGE_KEY = 'wild-homegame-data';
-
-interface StoredData {
-  currentUser: User | null;
-  users: Record<string, User>;
-  games: Record<string, Game>;
-  credentials: Record<string, string>;
-}
-
-function loadData(): StoredData {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) return JSON.parse(saved);
-  } catch {}
-  return { currentUser: null, users: {}, games: {}, credentials: {} };
-}
-
-function saveData(data: StoredData) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-}
-
-function generateSampleData(): StoredData {
-  const users: Record<string, User> = {};
-  const games: Record<string, Game> = {};
-  const credentials: Record<string, string> = {};
-
-  const sampleUsers = [
-    { id: 'u1', nickname: '德扑小王子', email: 'prince@test.com' },
-    { id: 'u2', nickname: 'All In姐', email: 'allin@test.com' },
-    { id: 'u3', nickname: '稳如老狗', email: 'steady@test.com' },
-    { id: 'u4', nickname: 'bluff大师', email: 'bluff@test.com' },
-    { id: 'u5', nickname: '牌桌新人', email: 'newbie@test.com' },
-    { id: 'u6', nickname: '鱼塘塘主', email: 'fish@test.com' },
-  ];
-
-  sampleUsers.forEach(u => {
-    users[u.id] = { ...u, createdAt: new Date().toISOString() };
-    credentials[u.email] = '123456';
+function mapDbGame(dbGame: any): Game {
+  const players: Record<string, GamePlayer> = {};
+  const playerRows = dbGame.game_players || [];
+  playerRows.forEach((p: any) => {
+    players[p.user_id] = {
+      userId: p.user_id,
+      nickname: p.profiles?.nickname || '未知',
+      isBanker: p.is_banker,
+      buyInHands: p.buy_in_hands || 0,
+      buyInAmount: p.buy_in_amount || 0,
+      totalChips: p.total_chips || 0,
+      remainingChips: p.remaining_chips,
+      settledGold: p.settled_gold,
+      isSettled: p.is_settled || false,
+      joinedAt: p.joined_at,
+    };
   });
 
-  const now = new Date();
-  const ts = (h: number, m: number) => {
-    const d = new Date(now);
-    d.setHours(h, m, 0, 0);
-    return d.toISOString();
+  const logs: GameLog[] = (dbGame.game_logs || []).map((l: any) => ({
+    id: l.id,
+    timestamp: l.created_at,
+    actorId: l.actor_id || '',
+    actorName: l.actor_name || '',
+    targetId: l.target_id || '',
+    targetName: l.target_name || '',
+    action: l.action as LogAction,
+    hands: l.hands,
+    chips: l.chips,
+    remainingChips: l.remaining_chips,
+    settledGold: l.settled_gold,
+    note: l.note,
+  }));
+
+  return {
+    id: dbGame.id,
+    createdBy: dbGame.created_by,
+    date: dbGame.date,
+    location: dbGame.location || '',
+    status: dbGame.status,
+    bankerId: dbGame.banker_id || '',
+    players,
+    logs,
+    chipsPerHand: dbGame.chips_per_hand || 1000,
+    goldPerHand: dbGame.gold_per_hand || 50,
+    bankerTip: dbGame.banker_tip || 0,
+    startedAt: dbGame.started_at,
+    settledAt: dbGame.settled_at,
+    createdAt: dbGame.created_at,
+    updatedAt: dbGame.updated_at,
   };
-
-  const sampleGames: Game[] = [
-    {
-      id: 'g1',
-      createdBy: 'u1',
-      date: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      location: '老王棋牌室',
-      status: 'settled',
-      bankerId: 'u1',
-      chipsPerHand: 1000,
-      goldPerHand: 50,
-      bankerTip: 10,
-      players: {
-        u1: { userId: 'u1', nickname: '德扑小王子', isBanker: true, buyInHands: 3, buyInAmount: 3000, totalChips: 3000, remainingChips: 5200, settledGold: 110, isSettled: true, joinedAt: ts(19, 0) },
-        u2: { userId: 'u2', nickname: 'All In姐', isBanker: false, buyInHands: 2, buyInAmount: 2000, totalChips: 2000, remainingChips: 500, settledGold: -75, isSettled: true, joinedAt: ts(19, 5) },
-        u3: { userId: 'u3', nickname: '稳如老狗', isBanker: false, buyInHands: 2, buyInAmount: 2000, totalChips: 2000, remainingChips: 2800, settledGold: 40, isSettled: true, joinedAt: ts(19, 10) },
-        u4: { userId: 'u4', nickname: 'bluff大师', isBanker: false, buyInHands: 3, buyInAmount: 3000, totalChips: 3000, remainingChips: 1500, settledGold: -75, isSettled: true, joinedAt: ts(19, 15) },
-      },
-      logs: [
-        { id: 'l1', timestamp: ts(19, 0), actorId: 'u1', actorName: '德扑小王子', targetId: 'u1', targetName: '德扑小王子', action: 'banker_set', note: '成为银行家' },
-        { id: 'l2', timestamp: ts(19, 5), actorId: 'u1', actorName: '德扑小王子', targetId: 'u2', targetName: 'All In姐', action: 'buy_in', hands: 2, chips: 2000 },
-        { id: 'l3', timestamp: ts(19, 10), actorId: 'u1', actorName: '德扑小王子', targetId: 'u3', targetName: '稳如老狗', action: 'buy_in', hands: 2, chips: 2000 },
-        { id: 'l4', timestamp: ts(19, 15), actorId: 'u1', actorName: '德扑小王子', targetId: 'u4', targetName: 'bluff大师', action: 'buy_in', hands: 3, chips: 3000 },
-        { id: 'l5', timestamp: ts(19, 20), actorId: 'u1', actorName: '德扑小王子', targetId: 'u1', targetName: '德扑小王子', action: 'buy_in', hands: 3, chips: 3000 },
-      ],
-      createdAt: ts(19, 0),
-      updatedAt: ts(23, 30),
-      startedAt: ts(19, 0),
-      settledAt: ts(23, 30),
-    },
-    {
-      id: 'g2',
-      createdBy: 'u2',
-      date: new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      location: '小李家',
-      status: 'settled',
-      bankerId: 'u3',
-      chipsPerHand: 1000,
-      goldPerHand: 50,
-      bankerTip: 10,
-      players: {
-        u1: { userId: 'u1', nickname: '德扑小王子', isBanker: false, buyInHands: 2, buyInAmount: 2000, totalChips: 2000, remainingChips: 100, settledGold: -95, isSettled: true, joinedAt: ts(19, 0) },
-        u2: { userId: 'u2', nickname: 'All In姐', isBanker: false, buyInHands: 3, buyInAmount: 3000, totalChips: 3000, remainingChips: 4800, settledGold: 90, isSettled: true, joinedAt: ts(19, 5) },
-        u3: { userId: 'u3', nickname: '稳如老狗', isBanker: true, buyInHands: 2, buyInAmount: 2000, totalChips: 2000, remainingChips: 1800, settledGold: -10, isSettled: true, joinedAt: ts(19, 10) },
-        u5: { userId: 'u5', nickname: '牌桌新人', isBanker: false, buyInHands: 2, buyInAmount: 2000, totalChips: 2000, remainingChips: 1300, settledGold: -35, isSettled: true, joinedAt: ts(19, 15) },
-      },
-      logs: [],
-      createdAt: ts(19, 0),
-      updatedAt: ts(23, 0),
-      startedAt: ts(19, 0),
-      settledAt: ts(23, 0),
-    },
-    {
-      id: 'g3',
-      createdBy: 'u1',
-      date: now.toISOString().split('T')[0],
-      location: '咖啡德扑俱乐部',
-      status: 'playing',
-      bankerId: 'u1',
-      chipsPerHand: 1000,
-      goldPerHand: 50,
-      bankerTip: 0,
-      players: {
-        u1: { userId: 'u1', nickname: '德扑小王子', isBanker: true, buyInHands: 3, buyInAmount: 3000, totalChips: 3000, remainingChips: null, settledGold: null, isSettled: false, joinedAt: ts(18, 0) },
-        u2: { userId: 'u2', nickname: 'All In姐', isBanker: false, buyInHands: 2, buyInAmount: 2000, totalChips: 2000, remainingChips: null, settledGold: null, isSettled: false, joinedAt: ts(18, 5) },
-        u3: { userId: 'u3', nickname: '稳如老狗', isBanker: false, buyInHands: 2, buyInAmount: 2000, totalChips: 2000, remainingChips: null, settledGold: null, isSettled: false, joinedAt: ts(18, 10) },
-        u6: { userId: 'u6', nickname: '鱼塘塘主', isBanker: false, buyInHands: 2, buyInAmount: 2000, totalChips: 2000, remainingChips: null, settledGold: null, isSettled: false, joinedAt: ts(18, 15) },
-      },
-      logs: [
-        { id: 'l10', timestamp: ts(18, 0), actorId: 'u1', actorName: '德扑小王子', targetId: 'u1', targetName: '德扑小王子', action: 'banker_set' },
-        { id: 'l11', timestamp: ts(18, 5), actorId: 'u1', actorName: '德扑小王子', targetId: 'u1', targetName: '德扑小王子', action: 'buy_in', hands: 3, chips: 3000 },
-        { id: 'l12', timestamp: ts(18, 10), actorId: 'u1', actorName: '德扑小王子', targetId: 'u2', targetName: 'All In姐', action: 'buy_in', hands: 2, chips: 2000 },
-        { id: 'l13', timestamp: ts(18, 15), actorId: 'u1', actorName: '德扑小王子', targetId: 'u3', targetName: '稳如老狗', action: 'buy_in', hands: 2, chips: 2000 },
-        { id: 'l14', timestamp: ts(18, 20), actorId: 'u1', actorName: '德扑小王子', targetId: 'u6', targetName: '鱼塘塘主', action: 'buy_in', hands: 2, chips: 2000 },
-      ],
-      createdAt: ts(18, 0),
-      updatedAt: ts(18, 20),
-      startedAt: ts(18, 0),
-      settledAt: null,
-    },
-  ];
-
-  sampleGames.forEach(g => { games[g.id] = g; });
-  return { currentUser: null, users, games, credentials };
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [data, setData] = useState<StoredData>(() => {
-    const saved = loadData();
-    if (Object.keys(saved.users).length === 0) {
-      const sample = generateSampleData();
-      saveData(sample);
-      return sample;
-    }
-    return saved;
-  });
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [users, setUsers] = useState<Record<string, User>>({});
+  const [games, setGames] = useState<Record<string, Game>>({});
   const [isLoading, setIsLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
 
-  useEffect(() => { setIsLoading(false); }, []);
+  const fetchGames = useCallback(async () => {
+    const { data } = await supabase
+      .from('games')
+      .select('*, game_players(*, profiles(nickname)), game_logs(*)')
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false });
 
-  const updateData = useCallback((updater: (prev: StoredData) => StoredData) => {
-    setData(prev => {
-      const next = updater(prev);
-      saveData(next);
-      return next;
+    if (data) {
+      const mapped: Record<string, Game> = {};
+      data.forEach(g => { mapped[g.id] = mapDbGame(g); });
+      setGames(mapped);
+    }
+  }, []);
+
+  const fetchProfile = useCallback(async (userId: string) => {
+    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    if (data) {
+      const user: User = { id: data.id, nickname: data.nickname, email: data.email || '', createdAt: data.created_at };
+      setCurrentUser(user);
+      setUsers(prev => ({ ...prev, [data.id]: user }));
+      setIsAdmin(data.is_admin || false);
+    }
+  }, []);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) fetchProfile(session.user.id);
+      setIsLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: string, session: Session | null) => {
+      if (session?.user) {
+        fetchProfile(session.user.id);
+      } else {
+        setCurrentUser(null);
+        setIsAdmin(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [fetchProfile]);
+
+  useEffect(() => {
+    if (currentUser) {
+      fetchGames();
+      const interval = setInterval(fetchGames, 15000);
+      return () => clearInterval(interval);
+    }
+  }, [currentUser, fetchGames]);
+
+  const login = useCallback(async (email: string, password: string): Promise<boolean> => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    return !error;
+  }, []);
+
+  const register = useCallback(async (email: string, password: string, nickname: string): Promise<boolean> => {
+    const { error } = await supabase.auth.signUp({
+      email, password,
+      options: { data: { nickname } },
+    });
+    return !error;
+  }, []);
+
+  const logout = useCallback(async () => {
+    await supabase.auth.signOut();
+    setCurrentUser(null);
+    setGames({});
+    setIsAdmin(false);
+  }, []);
+
+  const updateProfile = useCallback(async (nickname: string) => {
+    if (!currentUser) return;
+    await supabase.from('profiles').update({ nickname }).eq('id', currentUser.id);
+    setCurrentUser(prev => prev ? { ...prev, nickname } : null);
+  }, [currentUser]);
+
+  const addLog = useCallback(async (gameId: string, log: { actorId: string; actorName: string; targetId: string; targetName: string; action: LogAction; hands?: number; chips?: number; remainingChips?: number; settledGold?: number; note?: string }) => {
+    await supabase.from('game_logs').insert({
+      game_id: gameId, actor_id: log.actorId, actor_name: log.actorName,
+      target_id: log.targetId, target_name: log.targetName, action: log.action,
+      hands: log.hands, chips: log.chips, remaining_chips: log.remainingChips,
+      settled_gold: log.settledGold, note: log.note,
     });
   }, []);
 
-  const addLog = useCallback((gameId: string, log: Omit<GameLog, 'id' | 'timestamp'>) => {
-    updateData(prev => {
-      const game = prev.games[gameId];
-      if (!game) return prev;
-      const fullLog: GameLog = { ...log, id: generateId(), timestamp: new Date().toISOString() };
-      return {
-        ...prev,
-        games: {
-          ...prev.games,
-          [gameId]: { ...game, logs: [...game.logs, fullLog], updatedAt: new Date().toISOString() },
-        },
-      };
-    });
-  }, [updateData]);
-
-  const login = useCallback((email: string, password: string): boolean => {
-    if (data.credentials[email] === password) {
-      const user = Object.values(data.users).find(u => u.email === email);
-      if (user) {
-        updateData(prev => ({ ...prev, currentUser: user }));
-        return true;
-      }
+  const createGame = useCallback(async (location: string, date: string, chipsPerHand: number = 1000, goldPerHand: number = 50): Promise<string> => {
+    if (!currentUser) return '';
+    const { data } = await supabase.from('games').insert({
+      created_by: currentUser.id, date, location,
+      chips_per_hand: chipsPerHand, gold_per_hand: goldPerHand,
+    }).select().single();
+    if (data) {
+      await fetchGames();
+      return data.id;
     }
-    return false;
-  }, [data, updateData]);
+    return '';
+  }, [currentUser, fetchGames]);
 
-  const register = useCallback((email: string, password: string, nickname: string): boolean => {
-    if (data.credentials[email]) return false;
-    const id = generateId();
-    const user: User = { id, nickname, email, createdAt: new Date().toISOString() };
-    updateData(prev => ({
-      ...prev,
-      currentUser: user,
-      users: { ...prev.users, [id]: user },
-      credentials: { ...prev.credentials, [email]: password },
-    }));
-    return true;
-  }, [data, updateData]);
-
-  const logout = useCallback(() => {
-    updateData(prev => ({ ...prev, currentUser: null }));
-  }, [updateData]);
-
-  const updateProfile = useCallback((nickname: string) => {
-    if (!data.currentUser) return;
-    updateData(prev => ({
-      ...prev,
-      currentUser: prev.currentUser ? { ...prev.currentUser, nickname } : null,
-      users: prev.currentUser && prev.users[prev.currentUser.id]
-        ? { ...prev.users, [prev.currentUser.id]: { ...prev.users[prev.currentUser.id], nickname } }
-        : prev.users,
-    }));
-  }, [data.currentUser, updateData]);
-
-  const createGame = useCallback((location: string, date: string, chipsPerHand: number = 1000, goldPerHand: number = 50): string => {
-    if (!data.currentUser) return '';
-    const id = generateId();
-    const game: Game = {
-      id,
-      createdBy: data.currentUser.id,
-      date,
-      location,
-      status: 'waiting',
-      bankerId: '',
-      players: {},
-      logs: [],
-      chipsPerHand,
-      goldPerHand,
-      bankerTip: 0,
-      startedAt: null,
-      settledAt: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    updateData(prev => ({ ...prev, games: { ...prev.games, [id]: game } }));
-    return id;
-  }, [data.currentUser, updateData]);
-
-  const joinGame = useCallback((gameId: string) => {
-    if (!data.currentUser) return;
-    const user = data.currentUser;
-    updateData(prev => {
-      const game = prev.games[gameId];
-      if (!game || game.players[user.id]) return prev;
-      const player: GamePlayer = {
-        userId: user.id,
-        nickname: user.nickname,
-        isBanker: false,
-        buyInHands: 0,
-        buyInAmount: 0,
-        totalChips: 0,
-        remainingChips: null,
-        settledGold: null,
-        isSettled: false,
-        joinedAt: new Date().toISOString(),
-      };
-      const log: GameLog = {
-        id: generateId(), timestamp: new Date().toISOString(),
-        actorId: user.id, actorName: user.nickname,
-        targetId: user.id, targetName: user.nickname,
-        action: 'join',
-      };
-      return {
-        ...prev,
-        games: { ...prev.games, [gameId]: { ...game, players: { ...game.players, [user.id]: player }, logs: [...game.logs, log], updatedAt: new Date().toISOString() } },
-      };
+  const joinGame = useCallback(async (gameId: string) => {
+    if (!currentUser) return;
+    await supabase.from('game_players').upsert({
+      game_id: gameId, user_id: currentUser.id, is_banker: false,
+    }, { onConflict: 'game_id,user_id', ignoreDuplicates: true });
+    await addLog(gameId, {
+      actorId: currentUser.id, actorName: currentUser.nickname,
+      targetId: currentUser.id, targetName: currentUser.nickname,
+      action: 'join',
     });
-  }, [data.currentUser, updateData]);
+    await fetchGames();
+  }, [currentUser, addLog, fetchGames]);
 
-  const addPlayerToGame = useCallback((gameId: string, userId: string) => {
-    const actor = data.currentUser;
-    updateData(prev => {
-      const game = prev.games[gameId];
-      if (!game || game.players[userId]) return prev;
-      const user = prev.users[userId];
-      if (!user) return prev;
-      const player: GamePlayer = {
-        userId: user.id,
-        nickname: user.nickname,
-        isBanker: false,
-        buyInHands: 0,
-        buyInAmount: 0,
-        totalChips: 0,
-        remainingChips: null,
-        settledGold: null,
-        isSettled: false,
-        joinedAt: new Date().toISOString(),
-      };
-      const log: GameLog = {
-        id: generateId(), timestamp: new Date().toISOString(),
-        actorId: actor?.id || '', actorName: actor?.nickname || '',
-        targetId: userId, targetName: user.nickname,
-        action: 'join',
-      };
-      return {
-        ...prev,
-        games: { ...prev.games, [gameId]: { ...game, players: { ...game.players, [userId]: player }, logs: [...game.logs, log], updatedAt: new Date().toISOString() } },
-      };
+  const addPlayerToGame = useCallback(async (gameId: string, userId: string) => {
+    const user = users[userId];
+    if (!user || !currentUser) return;
+    await supabase.from('game_players').upsert({
+      game_id: gameId, user_id: userId, is_banker: false,
+    }, { onConflict: 'game_id,user_id', ignoreDuplicates: true });
+    await addLog(gameId, {
+      actorId: currentUser.id, actorName: currentUser.nickname,
+      targetId: userId, targetName: user.nickname,
+      action: 'join',
     });
-  }, [data.currentUser, updateData]);
+    await fetchGames();
+  }, [users, currentUser, addLog, fetchGames]);
 
-  const setBanker = useCallback((gameId: string, userId: string) => {
-    const user = data.users[userId];
-    const actor = data.currentUser;
-    if (!user || !actor) return;
-    updateData(prev => {
-      const game = prev.games[gameId];
-      if (!game) return prev;
-      const log: GameLog = {
-        id: generateId(), timestamp: new Date().toISOString(),
-        actorId: actor.id, actorName: actor.nickname,
-        targetId: userId, targetName: user.nickname,
-        action: 'banker_set',
-      };
-      return {
-        ...prev,
-        games: { ...prev.games, [gameId]: { ...game, bankerId: userId, logs: [...game.logs, log], updatedAt: new Date().toISOString() } },
-      };
+  const setBanker = useCallback(async (gameId: string, userId: string) => {
+    const user = users[userId];
+    if (!user || !currentUser) return;
+    await supabase.from('games').update({ banker_id: userId }).eq('id', gameId);
+    await addLog(gameId, {
+      actorId: currentUser.id, actorName: currentUser.nickname,
+      targetId: userId, targetName: user.nickname,
+      action: 'banker_set',
     });
-  }, [data.users, data.currentUser, updateData]);
+    await fetchGames();
+  }, [users, currentUser, addLog, fetchGames]);
 
-  const transferBanker = useCallback((gameId: string, toUserId: string) => {
-    const toUser = data.users[toUserId];
-    const actor = data.currentUser;
-    if (!toUser || !actor) return;
-    updateData(prev => {
-      const game = prev.games[gameId];
-      if (!game) return prev;
-      const log: GameLog = {
-        id: generateId(), timestamp: new Date().toISOString(),
-        actorId: actor.id, actorName: actor.nickname,
-        targetId: toUserId, targetName: toUser.nickname,
-        action: 'banker_transfer',
-      };
-      return {
-        ...prev,
-        games: { ...prev.games, [gameId]: { ...game, bankerId: toUserId, logs: [...game.logs, log], updatedAt: new Date().toISOString() } },
-      };
+  const transferBanker = useCallback(async (gameId: string, toUserId: string) => {
+    const toUser = users[toUserId];
+    if (!toUser || !currentUser) return;
+    await supabase.from('games').update({ banker_id: toUserId }).eq('id', gameId);
+    await addLog(gameId, {
+      actorId: currentUser.id, actorName: currentUser.nickname,
+      targetId: toUserId, targetName: toUser.nickname,
+      action: 'banker_transfer',
     });
-  }, [data.users, data.currentUser, updateData]);
+    await fetchGames();
+  }, [users, currentUser, addLog, fetchGames]);
 
-  const randomBanker = useCallback((gameId: string) => {
-    updateData(prev => {
-      const game = prev.games[gameId];
-      if (!game) return prev;
-      const playerIds = Object.keys(game.players);
-      if (playerIds.length === 0) return prev;
-      const randomId = playerIds[Math.floor(Math.random() * playerIds.length)];
-      const user = prev.users[randomId];
-      const actor = prev.currentUser;
-      const log: GameLog = {
-        id: generateId(), timestamp: new Date().toISOString(),
-        actorId: actor?.id || '', actorName: actor?.nickname || '',
-        targetId: randomId, targetName: user?.nickname || '',
-        action: 'banker_set', note: '随机选出银行家',
-      };
-      return {
-        ...prev,
-        games: { ...prev.games, [gameId]: { ...game, bankerId: randomId, logs: [...game.logs, log], updatedAt: new Date().toISOString() } },
-      };
+  const randomBanker = useCallback(async (gameId: string) => {
+    const game = games[gameId];
+    if (!game || !currentUser) return;
+    const playerIds = Object.keys(game.players);
+    if (playerIds.length === 0) return;
+    const randomId = playerIds[Math.floor(Math.random() * playerIds.length)];
+    const user = users[randomId];
+    await supabase.from('games').update({ banker_id: randomId }).eq('id', gameId);
+    await addLog(gameId, {
+      actorId: currentUser.id, actorName: currentUser.nickname,
+      targetId: randomId, targetName: user?.nickname || '',
+      action: 'banker_set', note: '随机选出银行家',
     });
-  }, [updateData]);
+    await fetchGames();
+  }, [games, users, currentUser, addLog, fetchGames]);
 
-  const updateGameSettings = useCallback((gameId: string, chipsPerHand: number, goldPerHand: number) => {
-    updateData(prev => {
-      const game = prev.games[gameId];
-      if (!game) return prev;
-      return { ...prev, games: { ...prev.games, [gameId]: { ...game, chipsPerHand, goldPerHand, updatedAt: new Date().toISOString() } } };
+  const updateGameSettings = useCallback(async (gameId: string, chipsPerHand: number, goldPerHand: number) => {
+    await supabase.from('games').update({ chips_per_hand: chipsPerHand, gold_per_hand: goldPerHand }).eq('id', gameId);
+    await fetchGames();
+  }, [fetchGames]);
+
+  const buyIn = useCallback(async (gameId: string, userId: string, hands: number) => {
+    const game = games[gameId];
+    const player = game?.players[userId];
+    const user = users[userId];
+    if (!game || !player || !user || !currentUser) return;
+    const chips = hands * game.chipsPerHand;
+    await supabase.from('game_players').update({
+      buy_in_hands: player.buyInHands + hands,
+      buy_in_amount: player.buyInAmount + chips,
+      total_chips: player.totalChips + chips,
+    }).eq('game_id', gameId).eq('user_id', userId);
+    await addLog(gameId, {
+      actorId: currentUser.id, actorName: currentUser.nickname,
+      targetId: userId, targetName: user.nickname,
+      action: 'buy_in', hands, chips,
     });
-  }, [updateData]);
+    await fetchGames();
+  }, [games, users, currentUser, addLog, fetchGames]);
 
-  const buyIn = useCallback((gameId: string, userId: string, hands: number) => {
-    const user = data.users[userId];
-    const actor = data.currentUser;
-    if (!user || !actor) return;
-    updateData(prev => {
-      const game = prev.games[gameId];
-      if (!game) return prev;
-      const player = game.players[userId];
-      if (!player) return prev;
-      const chips = hands * game.chipsPerHand;
-      const log: GameLog = {
-        id: generateId(), timestamp: new Date().toISOString(),
-        actorId: actor.id, actorName: actor.nickname,
-        targetId: userId, targetName: user.nickname,
-        action: 'buy_in', hands, chips,
-      };
-      return {
-        ...prev,
-        games: {
-          ...prev.games,
-          [gameId]: {
-            ...game,
-            players: {
-              ...game.players,
-              [userId]: {
-                ...player,
-                buyInHands: player.buyInHands + hands,
-                buyInAmount: player.buyInAmount + chips,
-                totalChips: player.totalChips + chips,
-              },
-            },
-            logs: [...game.logs, log],
-            updatedAt: new Date().toISOString(),
-          },
-        },
-      };
-    });
-  }, [data.users, data.currentUser, updateData]);
-
-  const batchBuyIn = useCallback((gameId: string, hands: number) => {
-    const actor = data.currentUser;
-    if (!actor) return;
-    updateData(prev => {
-      const game = prev.games[gameId];
-      if (!game) return prev;
-      const chips = hands * game.chipsPerHand;
-      const newPlayers = { ...game.players };
-      const newLogs = [...game.logs];
-      Object.values(newPlayers).forEach(player => {
-        newPlayers[player.userId] = {
-          ...player,
-          buyInHands: player.buyInHands + hands,
-          buyInAmount: player.buyInAmount + chips,
-          totalChips: player.totalChips + chips,
-        };
-        newLogs.push({
-          id: generateId(), timestamp: new Date().toISOString(),
-          actorId: actor.id, actorName: actor.nickname,
-          targetId: player.userId, targetName: player.nickname,
-          action: 'buy_in', hands, chips,
-          note: '批量买入',
-        });
+  const batchBuyIn = useCallback(async (gameId: string, hands: number) => {
+    const game = games[gameId];
+    if (!game || !currentUser) return;
+    const chips = hands * game.chipsPerHand;
+    for (const player of Object.values(game.players)) {
+      await supabase.from('game_players').update({
+        buy_in_hands: player.buyInHands + hands,
+        buy_in_amount: player.buyInAmount + chips,
+        total_chips: player.totalChips + chips,
+      }).eq('game_id', gameId).eq('user_id', player.userId);
+      await addLog(gameId, {
+        actorId: currentUser.id, actorName: currentUser.nickname,
+        targetId: player.userId, targetName: player.nickname,
+        action: 'buy_in', hands, chips, note: '批量买入',
       });
-      return {
-        ...prev,
-        games: { ...prev.games, [gameId]: { ...game, players: newPlayers, logs: newLogs, updatedAt: new Date().toISOString() } },
-      };
-    });
-  }, [data.currentUser, updateData]);
+    }
+    await fetchGames();
+  }, [games, currentUser, addLog, fetchGames]);
 
-  const returnChips = useCallback((gameId: string, userId: string, hands: number) => {
-    const user = data.users[userId];
-    const actor = data.currentUser;
-    if (!user || !actor) return;
-    updateData(prev => {
-      const game = prev.games[gameId];
-      if (!game) return prev;
-      const player = game.players[userId];
-      if (!player) return prev;
-      const chips = hands * game.chipsPerHand;
-      const newBuyInHands = Math.max(0, player.buyInHands - hands);
-      const newBuyInAmount = Math.max(0, player.buyInAmount - chips);
-      const newTotalChips = Math.max(0, player.totalChips - chips);
-      const log: GameLog = {
-        id: generateId(), timestamp: new Date().toISOString(),
-        actorId: actor.id, actorName: actor.nickname,
-        targetId: userId, targetName: user.nickname,
-        action: 'return', hands, chips: -chips,
-        note: `归还${hands}手，减少${chips}筹码`,
-      };
-      return {
-        ...prev,
-        games: {
-          ...prev.games,
-          [gameId]: {
-            ...game,
-            players: {
-              ...game.players,
-              [userId]: {
-                ...player,
-                buyInHands: newBuyInHands,
-                buyInAmount: newBuyInAmount,
-                totalChips: newTotalChips,
-              },
-            },
-            logs: [...game.logs, log],
-            updatedAt: new Date().toISOString(),
-          },
-        },
-      };
+  const returnChips = useCallback(async (gameId: string, userId: string, hands: number) => {
+    const game = games[gameId];
+    const player = game?.players[userId];
+    const user = users[userId];
+    if (!game || !player || !user || !currentUser) return;
+    const chips = hands * game.chipsPerHand;
+    await supabase.from('game_players').update({
+      buy_in_hands: Math.max(0, player.buyInHands - hands),
+      buy_in_amount: Math.max(0, player.buyInAmount - chips),
+      total_chips: Math.max(0, player.totalChips - chips),
+    }).eq('game_id', gameId).eq('user_id', userId);
+    await addLog(gameId, {
+      actorId: currentUser.id, actorName: currentUser.nickname,
+      targetId: userId, targetName: user.nickname,
+      action: 'return', hands, chips: -chips,
+      note: `归还${hands}手，减少${chips}筹码`,
     });
-  }, [data.users, data.currentUser, updateData]);
+    await fetchGames();
+  }, [games, users, currentUser, addLog, fetchGames]);
 
-  const settlePlayer = useCallback((gameId: string, userId: string, remainingChips: number) => {
-    const user = data.users[userId];
-    const actor = data.currentUser;
-    if (!user || !actor) return;
-    updateData(prev => {
-      const game = prev.games[gameId];
-      if (!game) return prev;
-      const player = game.players[userId];
-      if (!player) return prev;
-      const gold = calcPlayerGold({ ...player, remainingChips, isSettled: true }, game.chipsPerHand, game.goldPerHand);
-      const isResettle = player.isSettled;
-      const log: GameLog = {
-        id: generateId(), timestamp: new Date().toISOString(),
-        actorId: actor.id, actorName: actor.nickname,
-        targetId: userId, targetName: user.nickname,
-        action: 'settle', remainingChips, settledGold: gold,
-        note: isResettle ? `重新结算 (原 ${player.remainingChips})` : undefined,
-      };
-      return {
-        ...prev,
-        games: {
-          ...prev.games,
-          [gameId]: {
-            ...game,
-            players: {
-              ...game.players,
-              [userId]: { ...player, remainingChips, settledGold: gold, isSettled: true },
-            },
-            logs: [...game.logs, log],
-            updatedAt: new Date().toISOString(),
-          },
-        },
-      };
+  const settlePlayer = useCallback(async (gameId: string, userId: string, remainingChips: number) => {
+    const game = games[gameId];
+    const player = game?.players[userId];
+    const user = users[userId];
+    if (!game || !player || !user || !currentUser) return;
+    const gold = calcPlayerGold({ ...player, remainingChips, isSettled: true }, game.chipsPerHand, game.goldPerHand);
+    const isResettle = player.isSettled;
+    await supabase.from('game_players').update({
+      remaining_chips: remainingChips, settled_gold: gold, is_settled: true,
+    }).eq('game_id', gameId).eq('user_id', userId);
+    await addLog(gameId, {
+      actorId: currentUser.id, actorName: currentUser.nickname,
+      targetId: userId, targetName: user.nickname,
+      action: 'settle', remainingChips, settledGold: gold,
+      note: isResettle ? `重新结算 (原 ${player.remainingChips})` : undefined,
     });
-  }, [data.users, data.currentUser, updateData]);
+    await fetchGames();
+  }, [games, users, currentUser, addLog, fetchGames]);
 
-  const startGame = useCallback((gameId: string) => {
-    updateData(prev => {
-      const game = prev.games[gameId];
-      if (!game) return prev;
-      return { ...prev, games: { ...prev.games, [gameId]: { ...game, status: 'playing', startedAt: new Date().toISOString(), updatedAt: new Date().toISOString() } } };
-    });
-  }, [updateData]);
+  const startGame = useCallback(async (gameId: string) => {
+    await supabase.from('games').update({
+      status: 'playing', started_at: new Date().toISOString(),
+    }).eq('id', gameId);
+    await fetchGames();
+  }, [fetchGames]);
 
-  const settleGame = useCallback((gameId: string) => {
-    updateData(prev => {
-      const game = prev.games[gameId];
-      if (!game) return prev;
-      const tipInfo = calculateBankerTip(game);
-      return {
-        ...prev,
-        games: {
-          ...prev.games,
-          [gameId]: { ...game, status: 'settled', settledAt: new Date().toISOString(), bankerTip: tipInfo.tipAmount, updatedAt: new Date().toISOString() },
-        },
-      };
-    });
-  }, [updateData]);
+  const settleGame = useCallback(async (gameId: string) => {
+    const game = games[gameId];
+    if (!game) return;
+    const tipInfo = calculateBankerTip(game);
+    await supabase.from('games').update({
+      status: 'settled', settled_at: new Date().toISOString(), banker_tip: tipInfo.tipAmount,
+    }).eq('id', gameId);
+    await fetchGames();
+  }, [games, fetchGames]);
+
+  const deleteGame = useCallback(async (gameId: string) => {
+    await supabase.from('games').delete().eq('id', gameId);
+    await fetchGames();
+  }, [fetchGames]);
+
+  const removePlayerFromGame = useCallback(async (gameId: string, userId: string) => {
+    await supabase.from('game_players').delete().eq('game_id', gameId).eq('user_id', userId);
+    await fetchGames();
+  }, [fetchGames]);
+
+  const refreshGames = useCallback(async () => {
+    await fetchGames();
+  }, [fetchGames]);
+
+  const gameList = Object.values(games).sort((a, b) => {
+    const dateDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
+    if (dateDiff !== 0) return dateDiff;
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  });
 
   return (
     <AppContext.Provider value={{
-      currentUser: data.currentUser,
-      users: data.users,
-      games: data.games,
-      gameList: Object.values(data.games).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
-      isLoading,
+      currentUser, users, games, gameList, isLoading, isAdmin,
       login, register, logout, updateProfile,
       createGame, joinGame, addPlayerToGame, setBanker, transferBanker, randomBanker, updateGameSettings,
       buyIn, batchBuyIn, returnChips, settlePlayer,
       startGame, settleGame,
+      deleteGame, removePlayerFromGame, refreshGames,
     }}>
       {children}
     </AppContext.Provider>
