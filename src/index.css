@@ -1,0 +1,100 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
+
+  html {
+    @apply antialiased;
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-white dark:bg-black text-gray-900 dark:text-white min-h-screen;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  input, select, textarea {
+    @apply text-base;
+    font-size: 16px !important;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-white/80 dark:bg-surface-dark/80 backdrop-blur-xl rounded-2xl border border-gray-200/50 dark:border-white/10;
+  }
+
+  .glass-card-solid {
+    @apply bg-white dark:bg-surface-dark rounded-2xl border border-gray-200 dark:border-white/10;
+  }
+
+  .btn-primary {
+    @apply bg-felt-700 hover:bg-felt-800 text-white font-semibold py-3.5 px-6 rounded-xl transition-all duration-200 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-gold {
+    @apply bg-gradient-to-r from-gold-400 to-gold-500 hover:from-gold-500 hover:to-gold-600 text-black font-bold py-3.5 px-6 rounded-xl transition-all duration-200 active:scale-95;
+  }
+
+  .btn-secondary {
+    @apply bg-gray-100 dark:bg-surface-dark-secondary hover:bg-gray-200 dark:hover:bg-surface-dark-tertiary text-gray-900 dark:text-white font-medium py-3 px-5 rounded-xl transition-all duration-200 active:scale-95;
+  }
+
+  .btn-ghost {
+    @apply text-felt-700 dark:text-felt-400 font-medium py-2 px-4 rounded-lg hover:bg-felt-50 dark:hover:bg-felt-900/30 transition-all duration-200;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-3.5 rounded-xl bg-gray-50 dark:bg-surface-dark-secondary border border-gray-200 dark:border-white/10 focus:border-felt-500 dark:focus:border-felt-400 focus:ring-2 focus:ring-felt-500/20 outline-none transition-all duration-200 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500;
+  }
+
+  .section-title {
+    @apply text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 px-1 mb-2;
+  }
+
+  .status-badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .stat-number {
+    @apply text-3xl font-bold tabular-nums;
+  }
+
+  .tab-button {
+    @apply flex-1 py-2.5 text-sm font-medium rounded-lg transition-all duration-200;
+  }
+
+  .tab-button-active {
+    @apply bg-felt-700 text-white shadow-sm;
+  }
+
+  .tab-button-inactive {
+    @apply text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300;
+  }
+}
+
+@layer utilities {
+  .safe-bottom {
+    padding-bottom: max(env(safe-area-inset-bottom), 1rem);
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+}
