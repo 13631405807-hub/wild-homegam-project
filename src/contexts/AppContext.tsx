@@ -447,14 +447,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const fetchAllUsers = useCallback(async () => {
     const { data } = await supabase
       .from('profiles')
-      .select('id, nickname, avatar, created_at');
+      .select('id, email, nickname, avatar, created_at');
     if (data) {
       const usersMap: Record<string, User> = {};
       data.forEach((p: any) => {
         usersMap[p.id] = {
           id: p.id,
           nickname: p.nickname,
-          email: '',
+          email: p.email || '',
           avatar: p.avatar,
           createdAt: p.created_at,
         };

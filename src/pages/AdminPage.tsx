@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/contexts/AppContext';
+import { useOnlineUsers } from '@/hooks/useOnlineUsers';
 import { cn, formatDate, formatChips } from '@/lib/utils';
 import PlayerAvatar from '@/components/PlayerAvatar';
 import {
   Shield, Users, Gamepad2, ArrowLeft, Crown, Lock, Unlock,
-  Trash2, ChevronDown, ChevronUp, Settings2, AlertTriangle
+  Trash2, ChevronDown, ChevronUp, Settings2, AlertTriangle,
+  Wifi, WifiOff
 } from 'lucide-react';
 
 export default function AdminPage() {
@@ -13,6 +15,7 @@ export default function AdminPage() {
     currentUser, isAdmin, games, gameList,
     allProfiles, fetchAllProfiles, setAdminStatus, setProtectedStatus, adminDeleteGame
   } = useApp();
+  const onlineUsers = useOnlineUsers();
   const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState<'players' | 'games'>('players');
@@ -91,6 +94,7 @@ export default function AdminPage() {
               allProfiles.map(profile => {
                 const isExpanded = expandedPlayer === profile.id;
                 const isCurrentUser = profile.id === currentUser.id;
+                const isOnline = !!onlineUsers[profile.id];
 
                 return (
                   <div key={profile.id} className="glass-card-solid overflow-hidden">
@@ -98,12 +102,22 @@ export default function AdminPage() {
                       onClick={() => setExpandedPlayer(isExpanded ? null : profile.id)}
                       className="w-full flex items-center gap-3 px-4 py-3 text-left"
                     >
-                      <PlayerAvatar nickname={profile.nickname} size="md" />
+                      <div className="relative">
+                        <PlayerAvatar nickname={profile.nickname} size="md" />
+                        {isOnline && (
+                          <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-white dark:border-surface-dark" />
+                        )}
+                      </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-sm text-gray-900 dark:text-white truncate">
                             {profile.nickname}
                           </span>
+                          {isOnline && (
+                            <span className="status-badge bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400">
+                              <Wifi size={10} className="mr-1" /> 在线
+                            </span>
+                          )}
                           {profile.isAdmin && (
                             <span className="status-badge bg-gold-100 dark:bg-gold-900/30 text-gold-700 dark:text-gold-400">
                               <Crown size={10} className="mr-1" /> 管理员

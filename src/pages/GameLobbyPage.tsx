@@ -241,7 +241,7 @@ export default function GameLobbyPage() {
         )}
 
         {/* Start Game + Batch Buy-in */}
-        {game.status === 'waiting' && isBanker && players.length >= 2 && game.bankerId && (
+        {game.status === 'waiting' && isBanker && players.length >= 1 && game.bankerId && (
           <div className="space-y-3">
             {/* Batch Buy-in */}
             <div className="glass-card-solid p-3">
@@ -275,7 +275,7 @@ export default function GameLobbyPage() {
         {/* Add Player */}
         {isBanker && (game.status === 'waiting' || game.status === 'playing') && (
           <div>
-            <button onClick={() => setShowAddPlayer(!showAddPlayer)} className="btn-ghost w-full flex items-center justify-center gap-2 text-sm">
+            <button onClick={() => { setShowAddPlayer(!showAddPlayer); fetchAllUsers(); }} className="btn-ghost w-full flex items-center justify-center gap-2 text-sm">
               <UserPlus size={16} /> 添加玩家
             </button>
             {showAddPlayer && (

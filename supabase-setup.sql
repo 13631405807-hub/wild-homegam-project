@@ -11,6 +11,7 @@
 -- ============================================
 CREATE TABLE IF NOT EXISTS profiles (
   id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
+  email TEXT,
   nickname TEXT NOT NULL,
   avatar TEXT,
   is_admin BOOLEAN DEFAULT false,
@@ -125,9 +126,10 @@ ALTER PUBLICATION supabase_realtime ADD TABLE transactions;
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO public.profiles (id, nickname, is_admin, is_protected)
+  INSERT INTO public.profiles (id, email, nickname, is_admin, is_protected)
   VALUES (
     NEW.id,
+    NEW.email,
     COALESCE(NEW.raw_user_meta_data->>'nickname', split_part(NEW.email, '@', 1)),
     COALESCE((NEW.raw_user_meta_data->>'is_admin')::boolean, false),
     COALESCE((NEW.raw_user_meta_data->>'is_protected')::boolean, false)
@@ -144,6 +146,9 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
 -- 如果是已有数据库升级，在这里执行迁移
 -- ============================================
 -- 1. 添加新列到 profiles 表
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT false;
+-- 1. 添加新列到 profiles 表
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS email TEXT;
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT false;
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_protected BOOLEAN DEFAULT false;
 
@@ -168,9 +173,10 @@ CREATE POLICY "Admins can delete games" ON games
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO public.profiles (id, nickname, is_admin, is_protected)
+  INSERT INTO public.profiles (id, email, nickname, is_admin, is_protected)
   VALUES (
     NEW.id,
+    NEW.email,
     COALESCE(NEW.raw_user_meta_data->>'nickname', split_part(NEW.email, '@', 1)),
     COALESCE((NEW.raw_user_meta_data->>'is_admin')::boolean, false),
     COALESCE((NEW.raw_user_meta_data->>'is_protected')::boolean, false)
@@ -179,6 +185,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- 4. 将你的第一个管理员账号设为管理员和受保护（替换邮箱后执行）
+-- 4. 回填现有用户的邮箱
+UPDATE profiles SET email = auth.users.email
+FROM auth.users
+WHERE profiles.id = auth.users.id AND profiles.email IS NULL;
+
+-- 5. 将你的第一个管理员账号设为管理员和受保护（替换邮箱后执行）
 -- UPDATE profiles SET is_admin = true, is_protected = true
 -- WHERE id = (SELECT id FROM auth.users WHERE email = 'admin@wild.game');
