@@ -13,12 +13,21 @@ export default function NewGamePage() {
   const [chipsPerHand, setChipsPerHand] = useState(1000);
   const [goldPerHand, setGoldPerHand] = useState(50);
   const [showSettings, setShowSettings] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
 
   const handleCreate = async () => {
-    if (!currentUser) return;
-    const gameId = await createGame(location || '未设置地点', date, chipsPerHand, goldPerHand);
-    if (gameId) {
-      navigate(`/game/${gameId}`);
+    if (!currentUser || isCreating) return;
+
+    setIsCreating(true);
+    try {
+      const gameId = await createGame(location || '未设置地点', date, chipsPerHand, goldPerHand);
+      if (gameId) {
+        navigate(`/game/${gameId}`);
+      }
+    } catch (err) {
+      console.error('创建牌局失败:', err);
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -159,10 +168,17 @@ export default function NewGamePage() {
         <div className="pt-4 animate-slide-up" style={{ animationDelay: '0.15s' }}>
           <button
             onClick={handleCreate}
-            className="w-full btn-gold text-lg py-4 flex items-center justify-center gap-2"
+            disabled={isCreating}
+            className="w-full btn-gold text-lg py-4 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Plus size={22} />
-            开启牌局
+            {isCreating ? (
+              <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <>
+                <Plus size={22} />
+                开启牌局
+              </>
+            )}
           </button>
         </div>
       </div>

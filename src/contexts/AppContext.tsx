@@ -217,15 +217,49 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const createGame = useCallback(async (location: string, date: string, chipsPerHand: number = 1000, goldPerHand: number = 50): Promise<string> => {
     if (!currentUser) return '';
-    const { data } = await supabase.from('games').insert({
+
+    // 1. 创建牌局
+    const { data: game, error: gameError } = await supabase.from('games').insert({
       created_by: currentUser.id, date, location,
       chips_per_hand: chipsPerHand, gold_per_hand: goldPerHand,
     }).select().single();
-    if (data) {
-      await fetchGames();
-      return data.id;
+
+    if (gameError || !game) {
+      console.error('创建牌局失败:', gameError);
+      return '';
     }
-    return '';
+
+    // 2. 创建者自动成为第一个玩家（银行家）
+    const { error: playerError } = await supabase.from('game_players').upsert({
+      game_id: game.id,
+      user_id: currentUser.id,
+      is_banker: true,
+    });
+
+    if (playerError) {
+      console.error('添加玩家失败:', playerError);
+    }
+
+    // 3. 添加加入日志
+    await supabase.from('game_logs').insert({
+      game_id: game.id,
+      actor_id: currentUser.id,
+      actor_name: currentUser.nickname,
+      target_id: currentUser.id,
+      target_name: currentUser.nickname,
+      action: 'join',
+    });
+
+    // 4. 设置创建者为银行家
+    await supabase.from('games').update({ banker_id: currentUser.id }).eq('id', game.id);
+
+    // 5. 刷新游戏列表并等待完成
+    await fetchGames();
+
+    // 6. 等待状态更新完成
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    return game.id;
   }, [currentUser, fetchGames]);
 
   const joinGame = useCallback(async (gameId: string) => {

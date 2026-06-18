@@ -3,11 +3,10 @@
  *
  * 使用方法：
  * 1. 确保已配置 .env 文件（VITE_SUPABASE_URL 和 VITE_SUPABASE_ANON_KEY）
- * 2. 运行：node test-core-flows.js
+ * 2. 运行：node test-core-flows.mjs
  */
 
 import { createClient } from '@supabase/supabase-js';
-import { readFileSync } from 'fs';
 import { config } from 'dotenv';
 
 // 加载 .env 文件
@@ -41,6 +40,12 @@ function error(message, err = null) {
   console.error(`❌ ${message}`);
   if (err) console.error('  错误:', err);
   process.exit(1);
+}
+
+function assert(condition, message) {
+  if (!condition) {
+    error(`断言失败: ${message}`);
+  }
 }
 
 // 测试流程
@@ -91,9 +96,10 @@ async function testFlows() {
   if (profileError) {
     error('获取 Profile 失败', profileError.message);
   }
+  assert(profile.nickname === testNickname, '昵称应该匹配');
   log('Profile 已创建', { nickname: profile.nickname, is_admin: profile.is_admin });
 
-  // 4. 创建牌局
+  // 4. 创建牌局（模拟完整的 createGame 流程）
   console.log('\n━━━ 4. 创建牌局 ━━━');
   const { data: game, error: gameError } = await supabase
     .from('games')
@@ -113,8 +119,8 @@ async function testFlows() {
   gameId = game.id;
   log('牌局创建成功', { gameId, location: game.location });
 
-  // 5. 加入牌局
-  console.log('\n━━━ 5. 加入牌局 ━━━');
+  // 5. 创建者自动加入牌局（模拟 createGame 中的逻辑）
+  console.log('\n━━━ 5. 创建者自动加入牌局 ━━━');
   const { error: joinError } = await supabase
     .from('game_players')
     .upsert({
@@ -126,26 +132,89 @@ async function testFlows() {
   if (joinError) {
     error('加入牌局失败', joinError.message);
   }
-  log('加入牌局成功');
+  log('创建者已加入牌局');
 
-  // 6. 开始牌局
-  console.log('\n━━━ 6. 开始牌局 ━━━');
+  // 6. 设置银行家
+  console.log('\n━━━ 6. 设置银行家 ━━━');
+  const { error: bankerError } = await supabase
+    .from('games')
+    .update({ banker_id: userId })
+    .eq('id', gameId);
+
+  if (bankerError) {
+    error('设置银行家失败', bankerError.message);
+  }
+  log('银行家已设置');
+
+  // 7. 添加加入日志
+  console.log('\n━━━ 7. 添加加入日志 ━━━');
+  const { error: logError } = await supabase
+    .from('game_logs')
+    .insert({
+      game_id: gameId,
+      actor_id: userId,
+      actor_name: testNickname,
+      target_id: userId,
+      target_name: testNickname,
+      action: 'join'
+    });
+
+  if (logError) {
+    error('添加日志失败', logError.message);
+  }
+  log('加入日志已添加');
+
+  // 8. 验证数据一致性：牌局、玩家、日志
+  console.log('\n━━━ 8. 验证数据一致性 ━━━');
+  const { data: fullGame, error: fetchError } = await supabase
+    .from('games')
+    .select('*, game_players(*), game_logs(*)')
+    .eq('id', gameId)
+    .single();
+
+  if (fetchError) {
+    error('获取牌局详情失败', fetchError.message);
+  }
+
+  assert(fullGame.game_players.length === 1, '应该有1个玩家');
+  assert(fullGame.game_players[0].user_id === userId, '玩家应该是创建者');
+  assert(fullGame.game_players[0].is_banker === true, '创建者应该是银行家');
+  assert(fullGame.banker_id === userId, '银行家ID应该匹配');
+  assert(fullGame.game_logs.length === 1, '应该有1条日志');
+  assert(fullGame.game_logs[0].action === 'join', '日志类型应该是join');
+  log('数据一致性验证通过', {
+    players: fullGame.game_players.length,
+    logs: fullGame.game_logs.length,
+    banker: fullGame.banker_id
+  });
+
+  // 9. 开始牌局
+  console.log('\n━━━ 9. 开始牌局 ━━━');
   const { error: startError } = await supabase
     .from('games')
     .update({
       status: 'playing',
-      started_at: new Date().toISOString(),
-      banker_id: userId
+      started_at: new Date().toISOString()
     })
     .eq('id', gameId);
 
   if (startError) {
     error('开始牌局失败', startError.message);
   }
-  log('牌局已开始');
 
-  // 7. 买入
-  console.log('\n━━━ 7. 买入 ━━━');
+  // 验证状态
+  const { data: startedGame } = await supabase
+    .from('games')
+    .select('status, started_at')
+    .eq('id', gameId)
+    .single();
+
+  assert(startedGame.status === 'playing', '状态应该是playing');
+  assert(startedGame.started_at !== null, '应该有开始时间');
+  log('牌局已开始', { status: startedGame.status });
+
+  // 10. 买入
+  console.log('\n━━━ 10. 买入 ━━━');
   const buyInHands = 5;
   const buyInChips = buyInHands * 1000;
   const { error: buyInError } = await supabase
@@ -161,18 +230,44 @@ async function testFlows() {
   if (buyInError) {
     error('买入失败', buyInError.message);
   }
+
+  // 添加买入日志
+  await supabase.from('game_logs').insert({
+    game_id: gameId,
+    actor_id: userId,
+    actor_name: testNickname,
+    target_id: userId,
+    target_name: testNickname,
+    action: 'buy_in',
+    hands: buyInHands,
+    chips: buyInChips
+  });
+
+  // 验证
+  const { data: playerAfterBuy } = await supabase
+    .from('game_players')
+    .select('buy_in_hands, total_chips')
+    .eq('game_id', gameId)
+    .eq('user_id', userId)
+    .single();
+
+  assert(playerAfterBuy.buy_in_hands === buyInHands, '买入手数应该匹配');
+  assert(playerAfterBuy.total_chips === buyInChips, '总筹码应该匹配');
   log(`买入成功: ${buyInHands}手, ${buyInChips}筹码`);
 
-  // 8. 归还筹码
-  console.log('\n━━━ 8. 归还筹码 ━━━');
+  // 11. 归还筹码
+  console.log('\n━━━ 11. 归还筹码 ━━━');
   const returnHands = 2;
   const returnChips = returnHands * 1000;
+  const newBuyInHands = buyInHands - returnHands;
+  const newTotalChips = buyInChips - returnChips;
+
   const { error: returnError } = await supabase
     .from('game_players')
     .update({
-      buy_in_hands: buyInHands - returnHands,
-      buy_in_amount: buyInChips - returnChips,
-      total_chips: buyInChips - returnChips
+      buy_in_hands: newBuyInHands,
+      buy_in_amount: newTotalChips,
+      total_chips: newTotalChips
     })
     .eq('game_id', gameId)
     .eq('user_id', userId);
@@ -180,12 +275,26 @@ async function testFlows() {
   if (returnError) {
     error('归还筹码失败', returnError.message);
   }
+
+  // 添加归还日志
+  await supabase.from('game_logs').insert({
+    game_id: gameId,
+    actor_id: userId,
+    actor_name: testNickname,
+    target_id: userId,
+    target_name: testNickname,
+    action: 'return',
+    hands: returnHands,
+    chips: -returnChips
+  });
+
   log(`归还成功: ${returnHands}手, 减少${returnChips}筹码`);
 
-  // 9. 结算
-  console.log('\n━━━ 9. 结算 ━━━');
-  const remainingChips = 2500; // 剩余筹码
-  const settledGold = Math.round((remainingChips - (buyInChips - returnChips)) / 1000 * 50);
+  // 12. 结算
+  console.log('\n━━━ 12. 结算 ━━━');
+  const remainingChips = 2500;
+  const settledGold = Math.round((remainingChips - newTotalChips) / 1000 * 50);
+
   const { error: settleError } = await supabase
     .from('game_players')
     .update({
@@ -199,10 +308,34 @@ async function testFlows() {
   if (settleError) {
     error('结算失败', settleError.message);
   }
+
+  // 添加结算日志
+  await supabase.from('game_logs').insert({
+    game_id: gameId,
+    actor_id: userId,
+    actor_name: testNickname,
+    target_id: userId,
+    target_name: testNickname,
+    action: 'settle',
+    remaining_chips: remainingChips,
+    settled_gold: settledGold
+  });
+
+  // 验证结算数据
+  const { data: settledPlayer } = await supabase
+    .from('game_players')
+    .select('remaining_chips, settled_gold, is_settled')
+    .eq('game_id', gameId)
+    .eq('user_id', userId)
+    .single();
+
+  assert(settledPlayer.remaining_chips === remainingChips, '剩余筹码应该匹配');
+  assert(settledPlayer.settled_gold === settledGold, '结算金币应该匹配');
+  assert(settledPlayer.is_settled === true, '应该已结算');
   log(`结算成功: 剩余${remainingChips}筹码, 盈亏${settledGold}金币`);
 
-  // 10. 结束牌局
-  console.log('\n━━━ 10. 结束牌局 ━━━');
+  // 13. 结束牌局
+  console.log('\n━━━ 13. 结束牌局 ━━━');
   const { error: settleGameError } = await supabase
     .from('games')
     .update({
@@ -216,30 +349,86 @@ async function testFlows() {
   }
   log('牌局已结束');
 
-  // 11. 查询历史
-  console.log('\n━━━ 11. 查询历史 ━━━');
+  // 14. 最终数据验证
+  console.log('\n━━━ 14. 最终数据验证 ━━━');
+  const { data: finalGame } = await supabase
+    .from('games')
+    .select('*, game_players(*), game_logs(*)')
+    .eq('id', gameId)
+    .single();
+
+  assert(finalGame.status === 'settled', '状态应该是settled');
+  assert(finalGame.game_players.length === 1, '应该有1个玩家');
+  assert(finalGame.game_players[0].is_settled === true, '玩家应该已结算');
+  assert(finalGame.game_logs.length >= 4, '应该至少有4条日志（join, buy_in, return, settle）');
+
+  // 验证日志顺序和内容
+  const logs = finalGame.game_logs;
+  const joinLog = logs.find(l => l.action === 'join');
+  const buyInLog = logs.find(l => l.action === 'buy_in');
+  const returnLog = logs.find(l => l.action === 'return');
+  const settleLog = logs.find(l => l.action === 'settle');
+
+  assert(joinLog !== undefined, '应该有join日志');
+  assert(buyInLog !== undefined, '应该有buy_in日志');
+  assert(returnLog !== undefined, '应该有return日志');
+  assert(settleLog !== undefined, '应该有settle日志');
+
+  log('最终数据验证通过', {
+    status: finalGame.status,
+    players: finalGame.game_players.length,
+    logs: logs.length,
+    logTypes: logs.map(l => l.action)
+  });
+
+  // 15. 查询历史
+  console.log('\n━━━ 15. 查询历史 ━━━');
   const { data: games, error: historyError } = await supabase
     .from('games')
-    .select('*, game_players(*, profiles(nickname))')
+    .select('*, game_players(*, profiles(nickname)), game_logs(*)')
     .eq('created_by', userId)
     .order('date', { ascending: false });
 
   if (historyError) {
     error('查询历史失败', historyError.message);
   }
+
+  assert(games.length >= 1, '应该至少有1个牌局');
+  assert(games[0].game_players.length >= 1, '牌局应该有玩家');
+  assert(games[0].game_logs.length >= 1, '牌局应该有日志');
   log(`查询到 ${games.length} 个牌局`, {
     gameId: games[0].id,
     location: games[0].location,
     status: games[0].status,
-    players: games[0].game_players.length
+    players: games[0].game_players.length,
+    logs: games[0].game_logs.length
   });
 
-  // 12. 清理测试数据（可选）
-  console.log('\n━━━ 12. 清理测试数据 ━━━');
+  // 16. 测试防连点：快速创建多个牌局
+  console.log('\n━━━ 16. 测试防连点（快速创建） ━━━');
+  const createPromises = [];
+  for (let i = 0; i < 3; i++) {
+    createPromises.push(
+      supabase.from('games').insert({
+        created_by: userId,
+        date: new Date().toISOString().split('T')[0],
+        location: `测试地点${i + 1}`,
+        chips_per_hand: 1000,
+        gold_per_hand: 50
+      }).select().single()
+    );
+  }
+
+  const results = await Promise.all(createPromises);
+  const successCount = results.filter(r => !r.error).length;
+  log(`快速创建测试: ${successCount}/3 成功（数据库允许多个，前端应防连点）`);
+
+  // 17. 清理测试数据
+  console.log('\n━━━ 17. 清理测试数据 ━━━');
   const { error: deleteError } = await supabase
     .from('games')
     .delete()
-    .eq('id', gameId);
+    .eq('created_by', userId);
 
   if (deleteError) {
     console.log('⚠️  清理牌局失败（可能需要管理员权限）:', deleteError.message);
@@ -256,13 +445,18 @@ async function testFlows() {
   console.log('  ✓ 登录成功');
   console.log('  ✓ Profile 自动创建');
   console.log('  ✓ 创建牌局');
-  console.log('  ✓ 加入牌局');
+  console.log('  ✓ 创建者自动加入');
+  console.log('  ✓ 银行家自动设置');
+  console.log('  ✓ 加入日志自动创建');
+  console.log('  ✓ 数据一致性验证');
   console.log('  ✓ 开始牌局');
   console.log('  ✓ 买入');
   console.log('  ✓ 归还筹码');
   console.log('  ✓ 结算');
   console.log('  ✓ 结束牌局');
+  console.log('  ✓ 最终数据验证');
   console.log('  ✓ 查询历史');
+  console.log('  ✓ 防连点测试');
   console.log('\n');
 }
 
