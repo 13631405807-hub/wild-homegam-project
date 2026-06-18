@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/contexts/AppContext';
 import { MapPin, Calendar, Settings2, Users, ArrowLeft, Plus } from 'lucide-react';
@@ -13,12 +13,12 @@ export default function NewGamePage() {
   const [chipsPerHand, setChipsPerHand] = useState(1000);
   const [goldPerHand, setGoldPerHand] = useState(50);
   const [showSettings, setShowSettings] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
+  const isCreatingRef = useRef(false);
 
   const handleCreate = async () => {
-    if (!currentUser || isCreating) return;
+    if (!currentUser || isCreatingRef.current) return;
 
-    setIsCreating(true);
+    isCreatingRef.current = true;
     try {
       const gameId = await createGame(location || '未设置地点', date, chipsPerHand, goldPerHand);
       if (gameId) {
@@ -27,7 +27,7 @@ export default function NewGamePage() {
     } catch (err) {
       console.error('创建牌局失败:', err);
     } finally {
-      setIsCreating(false);
+      isCreatingRef.current = false;
     }
   };
 
@@ -168,17 +168,10 @@ export default function NewGamePage() {
         <div className="pt-4 animate-slide-up" style={{ animationDelay: '0.15s' }}>
           <button
             onClick={handleCreate}
-            disabled={isCreating}
-            className="w-full btn-gold text-lg py-4 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full btn-gold text-lg py-4 flex items-center justify-center gap-2"
           >
-            {isCreating ? (
-              <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <>
-                <Plus size={22} />
-                开启牌局
-              </>
-            )}
+            <Plus size={22} />
+            开启牌局
           </button>
         </div>
       </div>

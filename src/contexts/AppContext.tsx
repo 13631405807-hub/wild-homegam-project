@@ -445,21 +445,54 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Fetch all users for adding players
   const fetchAllUsers = useCallback(async () => {
-    const { data } = await supabase
+    console.log('Fetching all users...');
+
+    // Try fetching with minimal columns first
+    const { data, error } = await supabase
       .from('profiles')
-      .select('id, email, nickname, avatar, created_at');
+      .select('id, nickname');
+
+    if (error) {
+      console.error('Error fetching users:', error);
+      // Try alternative query
+      const { data: altData, error: altError } = await supabase
+        .rpc('get_all_profiles');
+      if (altError) {
+        console.error('Alternative query also failed:', altError);
+        return;
+      }
+      if (altData) {
+        console.log(`Fetched ${altData.length} users via RPC`);
+        const usersMap: Record<string, User> = {};
+        altData.forEach((p: any) => {
+          usersMap[p.id] = {
+            id: p.id,
+            nickname: p.nickname,
+            email: p.email || '',
+            createdAt: '',
+          };
+        });
+        setUsers(prev => ({ ...prev, ...usersMap }));
+      }
+      return;
+    }
+
     if (data) {
+      console.log(`Fetched ${data.length} users:`, data);
       const usersMap: Record<string, User> = {};
       data.forEach((p: any) => {
         usersMap[p.id] = {
           id: p.id,
           nickname: p.nickname,
           email: p.email || '',
-          avatar: p.avatar,
-          createdAt: p.created_at,
+          createdAt: p.created_at || '',
         };
       });
-      setUsers(prev => ({ ...prev, ...usersMap }));
+      setUsers(prev => {
+        const updated = { ...prev, ...usersMap };
+        console.log('Updated users state, total:', Object.keys(updated).length);
+        return updated;
+      });
     }
   }, []);
 

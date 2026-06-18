@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '@/contexts/AppContext';
 import { cn, formatChips, formatGold, chipsToGold, calculateGameSettlement, calculateBankerTip, formatTimestamp, getLogActionLabel } from '@/lib/utils';
@@ -59,6 +59,10 @@ export default function GameLobbyPage() {
   const [showLog, setShowLog] = useState(false);
   const [logFilter, setLogFilter] = useState<string>('all');
   const [showBankerMenu, setShowBankerMenu] = useState(false);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+
+  // Refs for anti-double-click
+  const isProcessingRef = useRef(false);
 
   // Fetch all users when component mounts
   useEffect(() => {
@@ -84,24 +88,71 @@ export default function GameLobbyPage() {
     ? game.logs
     : game.logs.filter(l => l.targetId === logFilter || l.actorId === logFilter);
 
-  const handleBuyIn = (userId: string) => {
-    if (buyInHands <= 0) return;
-    buyIn(gameId, userId, buyInHands);
-    setBuyInHands(1);
-    setActivePlayer(null);
+  const handleBuyIn = async (userId: string) => {
+    if (buyInHands <= 0 || isProcessingRef.current) return;
+    isProcessingRef.current = true;
+    try {
+      await buyIn(gameId, userId, buyInHands);
+      setBuyInHands(1);
+      setActivePlayer(null);
+    } finally {
+      isProcessingRef.current = false;
+    }
   };
 
-  const handleReturn = (userId: string) => {
-    if (returnHands <= 0) return;
-    returnChips(gameId, userId, returnHands);
-    setReturnHands(1);
-    setActivePlayer(null);
+  const handleReturn = async (userId: string) => {
+    if (returnHands <= 0 || isProcessingRef.current) return;
+    isProcessingRef.current = true;
+    try {
+      await returnChips(gameId, userId, returnHands);
+      setReturnHands(1);
+      setActivePlayer(null);
+    } finally {
+      isProcessingRef.current = false;
+    }
   };
 
-  const handleSettle = (userId: string) => {
-    settlePlayer(gameId, userId, settleChips);
-    setSettleChips(0);
-    setActivePlayer(null);
+  const handleSettle = async (userId: string) => {
+    if (isProcessingRef.current) return;
+    isProcessingRef.current = true;
+    try {
+      await settlePlayer(gameId, userId, settleChips);
+      setSettleChips(0);
+      setActivePlayer(null);
+    } finally {
+      isProcessingRef.current = false;
+    }
+  };
+
+  const handleStartGame = async () => {
+    if (isProcessingRef.current) return;
+    isProcessingRef.current = true;
+    try {
+      await startGame(gameId);
+    } finally {
+      isProcessingRef.current = false;
+    }
+  };
+
+  const handleSettleGame = async () => {
+    if (isProcessingRef.current) return;
+    isProcessingRef.current = true;
+    try {
+      await settleGame(gameId);
+    } finally {
+      isProcessingRef.current = false;
+    }
+  };
+
+  const handleBatchBuyIn = async () => {
+    if (isProcessingRef.current) return;
+    isProcessingRef.current = true;
+    try {
+      await batchBuyIn(gameId, batchHands);
+      setShowBatchBuy(false);
+    } finally {
+      isProcessingRef.current = false;
+    }
   };
 
   return (
@@ -165,15 +216,15 @@ export default function GameLobbyPage() {
           {/* Stats Row */}
           <div className="grid grid-cols-3 gap-3">
             <div className="text-center">
-              <p className="text-lg font-bold text-gray-900 dark:text-white tabular-nums">{players.length}</p>
+              <p className="text-lg font-bold text-gray-900 dark:text-white tabular-nums transition-all duration-300">{players.length}</p>
               <p className="text-xs text-gray-400">玩家</p>
             </div>
             <div className="text-center">
-              <p className="text-lg font-bold text-gray-900 dark:text-white tabular-nums">{totalHands}</p>
+              <p className="text-lg font-bold text-gray-900 dark:text-white tabular-nums transition-all duration-300">{totalHands}</p>
               <p className="text-xs text-gray-400">买入手数</p>
             </div>
             <div className="text-center">
-              <p className="text-lg font-bold text-gray-900 dark:text-white tabular-nums">{formatChips(totalChipsInPlay)}</p>
+              <p className="text-lg font-bold text-gray-900 dark:text-white tabular-nums transition-all duration-300">{formatChips(totalChipsInPlay)}</p>
               <p className="text-xs text-gray-400">总筹码</p>
             </div>
           </div>
@@ -256,18 +307,18 @@ export default function GameLobbyPage() {
                   <input type="number" value={batchHands} onChange={e => setBatchHands(Math.max(1, Number(e.target.value)))}
                     className="input-field text-center py-2 w-16" min="1" />
                   <button onClick={() => setBatchHands(batchHands + 1)} className="btn-secondary py-2 px-3"><Plus size={16} /></button>
-                  <button onClick={() => { batchBuyIn(gameId, batchHands); setShowBatchBuy(false); }}
+                  <button onClick={handleBatchBuyIn}
                     className="btn-primary py-2 px-4 text-sm flex-1">
                     每人 {batchHands} 手 ({formatChips(batchHands * game.chipsPerHand)})
                   </button>
                 </div>
               )}
             </div>
-            <button onClick={() => startGame(gameId)} className="w-full btn-gold text-lg py-4 animate-pulse-gold">开始牌局</button>
+            <button onClick={handleStartGame} className="w-full btn-gold text-lg py-4 animate-pulse-gold">开始牌局</button>
           </div>
         )}
         {game.status === 'playing' && isBanker && allSettled && (
-          <button onClick={() => settleGame(gameId)} className="w-full btn-gold text-lg py-4 flex items-center justify-center gap-2">
+          <button onClick={handleSettleGame} className="w-full btn-gold text-lg py-4 flex items-center justify-center gap-2">
             <Check size={20} /> 结束牌局
           </button>
         )}
@@ -280,17 +331,43 @@ export default function GameLobbyPage() {
             </button>
             {showAddPlayer && (
               <div className="glass-card-solid p-3 mt-2 animate-slide-down">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs text-gray-400">可添加的玩家</span>
+                  <button
+                    onClick={async () => {
+                      setIsLoadingUsers(true);
+                      await fetchAllUsers();
+                      setIsLoadingUsers(false);
+                    }}
+                    disabled={isLoadingUsers}
+                    className="text-xs text-blue-500 hover:text-blue-600"
+                  >
+                    {isLoadingUsers ? '加载中...' : '刷新列表'}
+                  </button>
+                </div>
                 {availableUsers.length > 0 ? (
                   <div className="space-y-1">
                     {availableUsers.map(user => (
                       <button key={user.id} onClick={() => { addPlayerToGame(gameId, user.id); setShowAddPlayer(false); }}
                         className="w-full flex items-center gap-3 p-2 rounded-xl hover:bg-gray-50 dark:hover:bg-surface-dark-secondary transition-colors">
                         <PlayerAvatar nickname={user.nickname} size="sm" />
-                        <span className="font-medium text-sm">{user.nickname}</span>
+                        <div className="flex-1 text-left">
+                          <span className="font-medium text-sm">{user.nickname}</span>
+                          {user.email && <p className="text-xs text-gray-400">{user.email}</p>}
+                        </div>
                       </button>
                     ))}
                   </div>
-                ) : <p className="text-sm text-gray-500 text-center py-2">暂无可添加的玩家</p>}
+                ) : (
+                  <div className="text-center py-3">
+                    <p className="text-sm text-gray-500 mb-2">暂无可添加的玩家</p>
+                    <p className="text-xs text-gray-400">
+                      {Object.keys(users).length === 0
+                        ? '正在加载用户列表...'
+                        : `已加载 ${Object.keys(users).length} 个用户，所有用户都已在牌局中`}
+                    </p>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -322,10 +399,10 @@ export default function GameLobbyPage() {
                           <span className="status-badge bg-gold-100 dark:bg-gold-900/30 text-gold-700 dark:text-gold-400">银行家</span>
                         )}
                       </div>
-                      <div className="text-xs text-gray-400 mt-0.5">{player.buyInHands}手买入</div>
+                      <div className="text-xs text-gray-400 mt-0.5 transition-all duration-300">{player.buyInHands}手买入</div>
                     </div>
                     <div className="text-right">
-                      <p className="font-bold text-base text-gray-900 dark:text-white tabular-nums">{formatChips(player.totalChips)}</p>
+                      <p className="font-bold text-base text-gray-900 dark:text-white tabular-nums transition-all duration-300">{formatChips(player.totalChips)}</p>
                       <p className="text-xs text-gray-400">筹码</p>
                     </div>
                     {game.status !== 'waiting' && (
