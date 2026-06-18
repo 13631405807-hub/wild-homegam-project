@@ -98,26 +98,28 @@
     text-wrap: balance;
   }
 
-  /* Pulse animation for value changes */
-  .value-updated {
-    animation: value-pulse 0.3s ease-out;
-  }
-
-  @keyframes value-pulse {
+  /* Number jump animation */
+  @keyframes number-jump {
     0% {
-      transform: scale(1);
+      transform: translateY(0);
+      opacity: 1;
     }
-    50% {
-      transform: scale(1.1);
+    30% {
+      transform: translateY(-8px);
+      opacity: 0.7;
     }
     100% {
-      transform: scale(1);
+      transform: translateY(0);
+      opacity: 1;
     }
+  }
+
+  .number-jump {
+    animation: number-jump 0.25s ease-out;
   }
 
   /* Smooth number transition */
   .tabular-nums {
     font-variant-numeric: tabular-nums;
-    transition: color 0.2s ease;
   }
 }

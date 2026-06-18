@@ -88,72 +88,69 @@ export default function GameLobbyPage() {
     ? game.logs
     : game.logs.filter(l => l.targetId === logFilter || l.actorId === logFilter);
 
-  const handleBuyIn = async (userId: string) => {
+  const handleBuyIn = (userId: string) => {
     if (buyInHands <= 0 || isProcessingRef.current) return;
     isProcessingRef.current = true;
-    try {
-      await buyIn(gameId, userId, buyInHands);
-      setBuyInHands(1);
-      setActivePlayer(null);
-    } finally {
+    // 立即执行，不等待
+    buyIn(gameId, userId, buyInHands).finally(() => {
       isProcessingRef.current = false;
-    }
+    });
+    setBuyInHands(1);
+    setActivePlayer(null);
   };
 
-  const handleReturn = async (userId: string) => {
+  const handleReturn = (userId: string) => {
     if (returnHands <= 0 || isProcessingRef.current) return;
     isProcessingRef.current = true;
-    try {
-      await returnChips(gameId, userId, returnHands);
-      setReturnHands(1);
-      setActivePlayer(null);
-    } finally {
+    returnChips(gameId, userId, returnHands).finally(() => {
       isProcessingRef.current = false;
-    }
+    });
+    setReturnHands(1);
+    setActivePlayer(null);
   };
 
-  const handleSettle = async (userId: string) => {
+  const handleSettle = (userId: string) => {
     if (isProcessingRef.current) return;
     isProcessingRef.current = true;
-    try {
-      await settlePlayer(gameId, userId, settleChips);
-      setSettleChips(0);
-      setActivePlayer(null);
-    } finally {
+    settlePlayer(gameId, userId, settleChips).finally(() => {
       isProcessingRef.current = false;
-    }
+    });
+    setSettleChips(0);
+    setActivePlayer(null);
   };
 
-  const handleStartGame = async () => {
+  const handleStartGame = () => {
     if (isProcessingRef.current) return;
     isProcessingRef.current = true;
-    try {
-      await startGame(gameId);
-    } finally {
+    startGame(gameId).finally(() => {
       isProcessingRef.current = false;
-    }
+    });
   };
 
-  const handleSettleGame = async () => {
+  const handleSettleGame = () => {
     if (isProcessingRef.current) return;
     isProcessingRef.current = true;
-    try {
-      await settleGame(gameId);
-    } finally {
+    settleGame(gameId).finally(() => {
       isProcessingRef.current = false;
-    }
+    });
   };
 
-  const handleBatchBuyIn = async () => {
+  const handleBatchBuyIn = () => {
     if (isProcessingRef.current) return;
     isProcessingRef.current = true;
-    try {
-      await batchBuyIn(gameId, batchHands);
-      setShowBatchBuy(false);
-    } finally {
+    batchBuyIn(gameId, batchHands).finally(() => {
       isProcessingRef.current = false;
-    }
+    });
+    setShowBatchBuy(false);
   };
+
+  // 保持玩家列表顺序稳定
+  const [stablePlayerOrder] = useState(() => players.map(p => p.userId));
+  const sortedPlayers = [...players].sort((a, b) => {
+    const aIdx = stablePlayerOrder.indexOf(a.userId);
+    const bIdx = stablePlayerOrder.indexOf(b.userId);
+    return aIdx - bIdx;
+  });
 
   return (
     <div className="min-h-screen pb-8">
@@ -216,15 +213,15 @@ export default function GameLobbyPage() {
           {/* Stats Row */}
           <div className="grid grid-cols-3 gap-3">
             <div className="text-center">
-              <p className="text-lg font-bold text-gray-900 dark:text-white tabular-nums transition-all duration-300">{players.length}</p>
+              <p className="text-lg font-bold text-gray-900 dark:text-white tabular-nums number-jump">{players.length}</p>
               <p className="text-xs text-gray-400">玩家</p>
             </div>
             <div className="text-center">
-              <p className="text-lg font-bold text-gray-900 dark:text-white tabular-nums transition-all duration-300">{totalHands}</p>
+              <p className="text-lg font-bold text-gray-900 dark:text-white tabular-nums number-jump">{totalHands}</p>
               <p className="text-xs text-gray-400">买入手数</p>
             </div>
             <div className="text-center">
-              <p className="text-lg font-bold text-gray-900 dark:text-white tabular-nums transition-all duration-300">{formatChips(totalChipsInPlay)}</p>
+              <p className="text-lg font-bold text-gray-900 dark:text-white tabular-nums number-jump">{formatChips(totalChipsInPlay)}</p>
               <p className="text-xs text-gray-400">总筹码</p>
             </div>
           </div>
@@ -383,7 +380,7 @@ export default function GameLobbyPage() {
           </div>
 
           <div className="space-y-2">
-            {players.map(player => {
+            {sortedPlayers.map(player => {
               const isExpanded = activePlayer === player.userId;
 
               return (
@@ -399,10 +396,10 @@ export default function GameLobbyPage() {
                           <span className="status-badge bg-gold-100 dark:bg-gold-900/30 text-gold-700 dark:text-gold-400">银行家</span>
                         )}
                       </div>
-                      <div className="text-xs text-gray-400 mt-0.5 transition-all duration-300">{player.buyInHands}手买入</div>
+                      <div className="text-xs text-gray-400 mt-0.5 number-jump">{player.buyInHands}手买入</div>
                     </div>
                     <div className="text-right">
-                      <p className="font-bold text-base text-gray-900 dark:text-white tabular-nums transition-all duration-300">{formatChips(player.totalChips)}</p>
+                      <p className="font-bold text-base text-gray-900 dark:text-white tabular-nums number-jump">{formatChips(player.totalChips)}</p>
                       <p className="text-xs text-gray-400">筹码</p>
                     </div>
                     {game.status !== 'waiting' && (
@@ -417,7 +414,7 @@ export default function GameLobbyPage() {
                     <div className="px-4 pb-2 -mt-1">
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-gray-500">剩余 {formatChips(player.remainingChips || 0)}</span>
-                        <span className={cn('font-bold tabular-nums', player.settledGold >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500')}>
+                        <span className={cn('font-bold tabular-nums number-jump', player.settledGold >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500')}>
                           {formatGold(player.settledGold)} 金币
                         </span>
                       </div>
@@ -578,7 +575,7 @@ export default function GameLobbyPage() {
                       <PlayerAvatar nickname={player.nickname} size="sm" />
                       <span className="font-medium text-sm text-gray-900 dark:text-white">{player.nickname}</span>
                     </div>
-                    <span className={cn('font-bold tabular-nums', (player.settledGold || 0) > 0 ? 'text-green-600 dark:text-green-400' : (player.settledGold || 0) < 0 ? 'text-red-500' : 'text-gray-400')}>
+                    <span className={cn('font-bold tabular-nums number-jump', (player.settledGold || 0) > 0 ? 'text-green-600 dark:text-green-400' : (player.settledGold || 0) < 0 ? 'text-red-500' : 'text-gray-400')}>
                       {player.settledGold !== null ? formatGold(player.settledGold) : '0'}
                     </span>
                   </div>
@@ -617,7 +614,7 @@ export default function GameLobbyPage() {
                             <span className="text-xs">🎁 慈善家</span>
                           )}
                         </div>
-                        <span className={cn('font-bold tabular-nums', (player.settledGold || 0) > 0 ? 'text-green-600 dark:text-green-400' : (player.settledGold || 0) < 0 ? 'text-red-500' : 'text-gray-400')}>
+                        <span className={cn('font-bold tabular-nums number-jump', (player.settledGold || 0) > 0 ? 'text-green-600 dark:text-green-400' : (player.settledGold || 0) < 0 ? 'text-red-500' : 'text-gray-400')}>
                           {player.settledGold !== null ? formatGold(player.settledGold) : '0'} 金币
                         </span>
                       </div>
