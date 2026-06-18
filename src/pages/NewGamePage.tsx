@@ -14,9 +14,9 @@ export default function NewGamePage() {
   const [goldPerHand, setGoldPerHand] = useState(50);
   const [showSettings, setShowSettings] = useState(false);
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!currentUser) return;
-    const gameId = createGame(location || '未设置地点', date, chipsPerHand, goldPerHand);
+    const gameId = await createGame(location || '未设置地点', date, chipsPerHand, goldPerHand);
     if (gameId) {
       navigate(`/game/${gameId}`);
     }
