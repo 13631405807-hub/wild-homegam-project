@@ -36,6 +36,7 @@ interface AppContextType {
   deleteGame: (gameId: string) => Promise<void>;
   removePlayerFromGame: (gameId: string, userId: string) => Promise<void>;
   refreshGames: () => Promise<void>;
+  fetchAllUsers: () => Promise<void>;
 
   // Admin functions
   allProfiles: User[];
@@ -442,6 +443,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await fetchGames();
   }, [fetchGames]);
 
+  // Fetch all users for adding players
+  const fetchAllUsers = useCallback(async () => {
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, nickname, avatar, created_at');
+    if (data) {
+      const usersMap: Record<string, User> = {};
+      data.forEach((p: any) => {
+        usersMap[p.id] = {
+          id: p.id,
+          nickname: p.nickname,
+          email: '',
+          avatar: p.avatar,
+          createdAt: p.created_at,
+        };
+      });
+      setUsers(prev => ({ ...prev, ...usersMap }));
+    }
+  }, []);
+
   // Admin functions
   const fetchAllProfiles = useCallback(async () => {
     const { data } = await supabase
@@ -490,7 +511,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       createGame, joinGame, addPlayerToGame, setBanker, transferBanker, randomBanker, updateGameSettings,
       buyIn, batchBuyIn, returnChips, settlePlayer,
       startGame, settleGame,
-      deleteGame, removePlayerFromGame, refreshGames,
+      deleteGame, removePlayerFromGame, refreshGames, fetchAllUsers,
       allProfiles, fetchAllProfiles, setAdminStatus, setProtectedStatus, adminDeleteGame,
     }}>
       {children}

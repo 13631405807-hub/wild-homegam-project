@@ -40,7 +40,8 @@ export default function GameLobbyPage() {
   const {
     currentUser, users, games, joinGame, addPlayerToGame, setBanker,
     transferBanker, randomBanker, updateGameSettings,
-    buyIn, batchBuyIn, returnChips, settlePlayer, startGame, settleGame
+    buyIn, batchBuyIn, returnChips, settlePlayer, startGame, settleGame,
+    fetchAllUsers
   } = useApp();
 
   const [showAddPlayer, setShowAddPlayer] = useState(false);
@@ -58,6 +59,11 @@ export default function GameLobbyPage() {
   const [showLog, setShowLog] = useState(false);
   const [logFilter, setLogFilter] = useState<string>('all');
   const [showBankerMenu, setShowBankerMenu] = useState(false);
+
+  // Fetch all users when component mounts
+  useEffect(() => {
+    fetchAllUsers();
+  }, [fetchAllUsers]);
 
   if (!gameId || !currentUser) return null;
   const game = games[gameId];
